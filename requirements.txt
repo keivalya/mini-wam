@@ -1,0 +1,19 @@
+torch
+torchvision
+numpy
+datasets
+
+# simulation
+gymnasium
+mujoco # or mujoco==3.x
+metaworld
+
+# data / image utils
+opencv-python
+
+# misc
+tqdm
+
+# video deps
+imageio
+imageio[ffmpeg]
