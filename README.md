@@ -1,5 +1,7 @@
 # mini-WAM
 
+(use with caution. this repo is still a work in progress)
+
 A tiny World Action Model from scratch for robot learning.
 
 mini-WAM extends the educational philosophy of mini-VLA.  
