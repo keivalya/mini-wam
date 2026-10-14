@@ -175,14 +175,23 @@ Setting `--model_type vla` removes everything except $\mathcal{L}_{\text{act}}$ 
 
 ### 3.7 How big is it?
 
-| | lines | parameters |
-|---|---|---|
-| encoders + fusion | 143 | *[filled in from the checkpoint]* |
-| action heads | 55 (+ 312 for diffusion/flow) | |
-| latent dynamics + readout | 89 | |
-| image decoder | 59 | |
-| losses | 76 | |
-| `MiniWAMPolicy` (wiring, imagine) | 258 | |
+Parameter counts for the toy world (state dim 6, action dim 2, $d=128$, MLP head):
+
+| module | file | lines | parameters |
+|---|---|---|---|
+| image encoder (keypoints) | `models/encoders.py` | 123 (all encoders) | 71,568 |
+| text encoder (GRU) | | | 75,264 |
+| state encoder | | | 9,024 |
+| fusion | `models/fusion.py` | 20 | 66,048 |
+| action head (MLP) | `models/action_heads.py` | 55 | 16,770 |
+| **latent dynamics** | `models/dynamics_head.py` | 89 | **132,480** |
+| **state readout (linear)** | | | **774** |
+| **image decoder** | `models/image_decoder.py` | 59 | **375,811** |
+| losses | `models/losses.py` | 76 | — |
+| wiring + `imagine()` | `models/wam_policy.py` | 258 | — |
+| **total** | | | **WAM 747,739 · VLA 238,674** |
+
+The bold rows are what a WAM adds to a VLA. Two-thirds of the extra parameters are the image decoder; the world model itself (dynamics + readout) is about 133k parameters.
 
 ---
 
