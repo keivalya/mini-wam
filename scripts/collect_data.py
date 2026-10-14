@@ -1,4 +1,7 @@
-"""Collect WAM-compatible demonstration data from Meta-World MT1 environments.
+"""Collect WAM-compatible demonstration data from an expert policy.
+
+    --env toy        2D point-mass world (numpy only, seconds on a laptop)
+    --env metaworld  Meta-World MT1 task with its scripted expert
 
 mini-VLA data:
     observation_t -> action_t
@@ -12,9 +15,23 @@ Saved .npz keys:
     actions      : (N, action_dim)
     next_images  : (N, H, W, 3)
     next_states  : (N, state_dim)
+    is_expert    : (N,)          1 if a_t came from the expert, 0 if it was a random exploration action
+    episode_ids  : (N,)          which episode each transition belongs to
+    timesteps    : (N,)          step index inside the episode
     text_ids     : (N, T_text)
     texts        : (N,)
     vocab        : dict
+    state_labels : (state_dim,)  human-readable name of every state dimension
+
+Transitions are stored in episode order, so the WAM can train on
+multi-step windows (o_t, a_t, ..., a_t+H-1, o_t+H) inside one episode.
+
+Why random actions (--random-action-prob)?
+    In pure expert data the action is a function of the state, so a world
+    model can predict o_t+1 from o_t alone and simply ignore a_t. It then
+    "imagines" the expert's future no matter what action you ask about.
+    Mixing in random actions breaks that shortcut: the world model trains on
+    every transition, the policy imitates only the expert ones (is_expert).
 """
 
 import os
@@ -22,8 +39,6 @@ import argparse
 import time
 
 import numpy as np
-import gymnasium as gym
-from metaworld.policies import ENV_POLICY_MAP
 
 from utils.tokenizer import SimpleTokenizer
 
@@ -31,7 +46,8 @@ from utils.tokenizer import SimpleTokenizer
 def parse_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--env-name", type=str, default="push-v3")
+    parser.add_argument("--env", type=str, default="toy", choices=["toy", "metaworld"])
+    parser.add_argument("--env-name", type=str, default="push-v3", help="Meta-World task")
 
     parser.add_argument(
         "--camera-name",
@@ -46,6 +62,13 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--episodes", type=int, default=50)
     parser.add_argument("--max-steps", type=int, default=150)
+
+    parser.add_argument(
+        "--image-size",
+        type=int,
+        default=64,
+        help="Images are resized to (image-size, image-size) before saving.",
+    )
 
     parser.add_argument(
         "--output-path",
@@ -64,34 +87,44 @@ def parse_args():
         "--instruction",
         type=str,
         default="push the object to the goal",
-        help="Fixed instruction for all episodes.",
+        help="Fixed instruction for all Meta-World episodes (toy env picks its own).",
     )
 
     parser.add_argument(
         "--stop-on-success",
         action="store_true",
-        help="End each episode early once Meta-World reports success.",
+        help="End each episode early once the env reports success.",
+    )
+
+    parser.add_argument(
+        "--random-action-prob",
+        type=float,
+        default=0.3,
+        help="Probability of starting a burst of random (non-expert) actions at each step.",
+    )
+
+    parser.add_argument(
+        "--random-burst",
+        type=int,
+        default=3,
+        help="Max length of a random-action burst (actual length ~ U{1..random-burst}).",
+    )
+
+    parser.add_argument(
+        "--expert-noise",
+        type=float,
+        default=0.1,
+        help="Toy env only: std of Gaussian noise added to expert actions.",
     )
 
     return parser.parse_args()
 
 
-def extract_state(obs):
-    """Meta-World observations are flat numpy arrays."""
-    return np.asarray(obs, dtype=np.float32).ravel()
-
-
-def render_image(env):
-    """Render RGB image from the current environment state."""
-    img = env.render()
-
-    if img is None:
-        raise RuntimeError(
-            "env.render() returned None. Make sure render_mode='rgb_array' "
-            "is passed when creating the Meta-World environment."
-        )
-
-    return np.asarray(img, dtype=np.uint8)
+def resize(img, size):
+    if img.shape[0] == size and img.shape[1] == size:
+        return img
+    import cv2
+    return cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA)
 
 
 def tokenize_texts(texts):
@@ -109,70 +142,120 @@ def tokenize_texts(texts):
     return text_ids, tokenizer.vocab
 
 
+class ExpertEnv:
+    """Common interface: reset(ep) -> (img, state, text), expert(), step(a) -> (img, state, done, success)."""
+
+    def __init__(self, args):
+        self.args = args
+
+        if args.env == "toy":
+            from envs.toy_point_env import ToyPointEnv, STATE_LABELS
+
+            self.env = ToyPointEnv(seed=args.seed, image_size=args.image_size)
+            self.state_labels = STATE_LABELS
+
+        else:
+            from envs.metaworld_env import MetaWorldMT1Wrapper, METAWORLD_STATE_LABELS
+            from metaworld.policies import ENV_POLICY_MAP
+
+            self.env = MetaWorldMT1Wrapper(
+                env_name=args.env_name,
+                seed=args.seed,
+                render_mode="rgb_array",
+                camera_name=args.camera_name,
+            )
+            self.policy = ENV_POLICY_MAP[args.env_name]()
+            self.state_labels = METAWORLD_STATE_LABELS[: self.env.state_dim]
+
+    def reset(self, ep):
+        img, state, info = self.env.reset(seed=self.args.seed + ep)
+        self.state = state
+        if self.args.env == "toy":
+            return img, state, info["instruction"]
+        return img, state, self.args.instruction
+
+    def random_action(self, rng):
+        if self.args.env == "toy":
+            return rng.uniform(-1.0, 1.0, size=self.env.action_dim).astype(np.float32)
+        return self.env.env.action_space.sample().astype(np.float32)
+
+    def expert(self):
+        if self.args.env == "toy":
+            return self.env.expert_action(noise=self.args.expert_noise)
+        return np.asarray(self.policy.get_action(self.state), dtype=np.float32)
+
+    def step(self, action):
+        img, state, reward, done, info = self.env.step(action)
+        self.state = state
+        return img, state, done, int(info.get("success", 0))
+
+    def close(self):
+        self.env.close()
+
+
 def main():
     args = parse_args()
-    os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
+    os.makedirs(os.path.dirname(args.output_path) or ".", exist_ok=True)
 
-    env = gym.make(
-        "Meta-World/MT1",
-        env_name=args.env_name,
-        seed=args.seed,
-        render_mode="rgb_array",
-        camera_name=args.camera_name,
-    )
-
-    policy = ENV_POLICY_MAP[args.env_name]()
+    env = ExpertEnv(args)
 
     images = []
     states = []
     actions = []
     next_images = []
     next_states = []
+    is_expert = []
+    episode_ids = []
+    timesteps = []
     texts = []
 
-    instruction = args.instruction
+    rng = np.random.default_rng(args.seed)
 
     total_successes = 0
 
     for ep in range(args.episodes):
-        obs, info = env.reset(seed=args.seed + ep)
+        image_t, state_t, instruction = env.reset(ep)
+        image_t = resize(image_t, args.image_size)
 
         done = False
         steps = 0
         episode_success = 0
+        burst = 0
 
         while not done and steps < args.max_steps:
-            # Current observation o_t
-            image_t = render_image(env)
-            state_t = extract_state(obs)
+            # Expert action a_t, or (sometimes) a random exploration action
+            if burst == 0 and rng.random() < args.random_action_prob:
+                burst = rng.integers(1, args.random_burst + 1)
 
-            # Expert action a_t
-            action_t = policy.get_action(obs)
-            action_t = np.asarray(action_t, dtype=np.float32)
+            expert_step = burst == 0
+            if expert_step:
+                action_t = env.expert()
+            else:
+                action_t = env.random_action(rng)
+                burst -= 1
 
             # Step to next observation o_{t+1}
-            next_obs, reward, terminated, truncated, info = env.step(action_t)
+            image_tp1, state_tp1, done, success = env.step(action_t)
+            image_tp1 = resize(image_tp1, args.image_size)
 
-            image_tp1 = render_image(env)
-            state_tp1 = extract_state(next_obs)
-
-            success = int(info.get("success", 0))
             episode_success = max(episode_success, success)
 
             # Store WAM transition:
             # observation_t -> action_t + observation_t+1
             images.append(image_t.copy())
-            states.append(state_t.copy())
+            states.append(np.asarray(state_t, dtype=np.float32).copy())
             actions.append(action_t.copy())
             next_images.append(image_tp1.copy())
-            next_states.append(state_tp1.copy())
+            next_states.append(np.asarray(state_tp1, dtype=np.float32).copy())
+            is_expert.append(float(expert_step))
+            episode_ids.append(ep)
+            timesteps.append(steps)
             texts.append(instruction)
 
-            obs = next_obs
+            image_t, state_t = image_tp1, state_tp1
             steps += 1
 
-            done = bool(terminated or truncated)
-
+            # (the toy env already reports done=True on success)
             if args.stop_on_success and success == 1:
                 done = True
 
@@ -194,6 +277,9 @@ def main():
     actions = np.stack(actions, axis=0)
     next_images = np.stack(next_images, axis=0)
     next_states = np.stack(next_states, axis=0)
+    is_expert = np.asarray(is_expert, dtype=np.float32)
+    episode_ids = np.asarray(episode_ids, dtype=np.int64)
+    timesteps = np.asarray(timesteps, dtype=np.int64)
     texts = np.asarray(texts)
 
     text_ids, vocab = tokenize_texts(texts)
@@ -205,13 +291,18 @@ def main():
         actions=actions,
         next_images=next_images,
         next_states=next_states,
+        is_expert=is_expert,
+        episode_ids=episode_ids,
+        timesteps=timesteps,
         text_ids=text_ids,
         texts=texts,
         vocab=vocab,
+        state_labels=np.asarray(env.state_labels),
+        env=np.asarray(args.env),
     )
 
     print()
-    print("Saved WAM-compatible Meta-World dataset to:", args.output_path)
+    print("Saved WAM-compatible dataset to:", args.output_path)
     print("  images:      ", images.shape)
     print("  states:      ", states.shape)
     print("  actions:     ", actions.shape)
@@ -219,6 +310,7 @@ def main():
     print("  next_states: ", next_states.shape)
     print("  text_ids:    ", text_ids.shape)
     print("  vocab size:  ", len(vocab))
+    print("  expert frac: ", f"{is_expert.mean():.2f}")
     print("  successes:   ", f"{total_successes}/{args.episodes}")
 
 
