@@ -12,6 +12,7 @@ Usage:
 """
 
 import os
+import json
 import argparse
 
 import numpy as np
@@ -42,6 +43,7 @@ def parse_args():
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--save-video", action="store_true")
     parser.add_argument("--video-dir", type=str, default="videos")
+    parser.add_argument("--json-out", type=str, default=None, help="Write success rate / steps here.")
 
     return parser.parse_args()
 
@@ -146,6 +148,11 @@ def main():
     env.close()
     print(f"[test] Success rate: {successes}/{args.episodes} = {successes / args.episodes:.0%} "
           f"| mean steps: {np.mean(lengths):.1f}")
+
+    if args.json_out:
+        with open(args.json_out, "w") as f:
+            json.dump({"success_rate": successes / args.episodes, "episodes": args.episodes,
+                       "mean_steps": float(np.mean(lengths)), "seed": args.seed}, f, indent=2)
 
 
 if __name__ == "__main__":
