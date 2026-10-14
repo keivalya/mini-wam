@@ -225,8 +225,6 @@ Why bother? In pure expert data, $a_t$ is a function of $s_t$. A world model can
 
 ## 5. Experiments
 
-*[In progress: results from the Explorer runs will be filled in here.]*
-
 ### 5.1 Setup and metrics
 
 Every configuration is run **three times** (seeds 0, 1, 2). Each seed has its own dataset (400 episodes), its own train/held-out split (360/40 episodes) and its own initialization. Every run trains a mini-WAM *and* a mini-VLA on the same data with the same encoders and MLP action head, for 15 epochs. I report mean ± standard deviation over the three seeds. All runs were done on single GPUs (mostly V100s) on Northeastern's Explorer cluster; one full three-seed run takes about 15 minutes.
@@ -395,7 +393,23 @@ pip install -r requirements.txt
 bash scripts/run_toy.sh        # 3 seeds: collect, train WAM + VLA, evaluate, test, visualize, summarize
 ```
 
-Every experiment in §5 is `scripts/run_toy.sh` with **one line** of its config block changed.
+Every experiment in §5 is `scripts/run_toy.sh` with **one line** of its configuration block changed:
+
+| experiment | change in `scripts/run_toy.sh` | results |
+|---|---|---|
+| baseline | none | `docs/results/baseline` |
+| expert-only data | `RANDOM_ACTION_PROB=0.0` | `docs/results/explore-0.0` |
+| more exploration | `RANDOM_ACTION_PROB=0.6` | `docs/results/explore-0.6` |
+| no latent-consistency loss | `LATENT_WEIGHT=0.0` | `docs/results/no-latent` |
+| no image loss | `IMAGE_WEIGHT=0.0` | `docs/results/no-image` |
+| horizon 1 / 10 | `HORIZON=1` / `HORIZON=10` | `docs/results/horizon-1`, `horizon-10` |
+| fewer demos | `EPISODES=25` / `50` / `100` | `docs/results/episodes-*` |
+| 25 demos, matched steps | `EPISODES=25`, `EPOCHS=225` | `docs/results/episodes-25-matched` |
+| image + language only | `STATE_INPUT=0` | `docs/results/image-only` |
+
+Each results folder has, per seed, `wam_eval.json` (imagination and counterfactual errors, readout $R^2$), `wam_test.json` and `vla_test.json` (closed-loop success), plus a `summary.json` with mean ± std. The figures are rebuilt from those files with `python docs/figures/make_figures.py`.
+
+On a single V100 one three-seed run takes 15–30 minutes. Most of that is the closed-loop tests and the image decoder, not the world model.
 
 ## References
 
