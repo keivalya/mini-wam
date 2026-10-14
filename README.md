@@ -1,175 +1,149 @@
+<div align="center">
+
 # mini-WAM
 
-(use with caution. this repo is still a work in progress)
+</div>
 
-A tiny World Action Model from scratch for robot learning.
-
-mini-WAM extends the educational philosophy of [mini-VLA](https://github.com/keivalya/mini-vla).
-
-Where mini-VLA learns:
-
-```text
-image_t + language + state_t → action_t
-```
-
-mini-WAM learns:
-
-```text
-image_t + language + state_t → action_t + state_t+1 + image_t+1
-```
-
-## Why mini-WAM?
-
-A VLA learns to act.
-A WAM learns to act while predicting what its action will do to the world.
-
-And because that prediction happens in a latent space you can decode, you
-can *look inside*: watch the model imagine the future, ask it "what if I
-pushed left instead?", and check which latent directions mean "where is
-the agent" or "how fast is it moving".
-
-## Read the paper
-
-**[mini-WAM: Building a World Action Model from Scratch](docs/mini-wam-paper.md)** walks through the whole model for people coming from VLAs, with a small three-seed study on the toy world. Main findings:
-
-* The latent world model imagines 15 steps ahead with ~80× less state error than "nothing changes", and every imagined latent is linearly readable.
-* Trained on expert demos only, it predicts what happened *better* but understands other actions **15× worse**. A few random-action bursts in the data fix it.
-* With the state as input, world modeling doesn't help the policy. From **pixels alone** it more than doubles closed-loop success (80% vs. 36%), because imagination recovers the velocity a single frame can't show.
-
-## The model in one picture
-
-```text
-image_t ──► ImageEncoder ──┐
-text    ──► TextEncoder  ──┼─► Fusion ──► z_t   (latent world state)
-state_t ──► StateEncoder ──┘               │
-                                           ├─► ActionHead    ──► a_t           act
-                                           ├─► StateReadout  ──► s_t           (linear probe)
-                                           ├─► ImageDecoder  ──► image_t
-                                           │
-                   a_t ──► LatentDynamics(z_t, a_t) ──► z_t+1   imagine
-                                           ├─► StateReadout  ──► s_t+1
-                                           ├─► ImageDecoder  ──► image_t+1
-                                           └─► ActionHead    ──► a_t+1 ...     dream
-```
-
-Everything lives on one latent `z`. The policy acts from `z`, the dynamics
-moves `z` forward given an action, and the readouts turn any `z` (real or
-imagined) back into a state and an image. So the WAM can roll its own
-policy forward entirely inside its head, then show you what it expects to see.
-
-| file | what it does |
-|---|---|
-| `models/encoders.py` | image (TinyCNN or spatial-softmax keypoints), text (GRU), state (MLP) encoders |
-| `models/fusion.py` | fuses the three tokens into the latent world state `z_t` |
-| `models/action_heads.py` | `mlp` / `diffusion` / `flow` policy heads behind one interface |
-| `models/dynamics_head.py` | `LatentDynamicsMLP` (z, a → z′) and `StateReadout` (z → s) |
-| `models/image_decoder.py` | z → 64×64 image |
-| `models/losses.py` | action + state + image + latent-consistency losses |
-| `models/wam_policy.py` | wires everything together: `forward`, `act`, `imagine` |
-
-### Training objective
-
-For a window of `H` steps inside one episode (`--horizon`, default 5):
-
-```text
-z_t       = encode(o_t)
-ẑ_t+k     = dynamics(ẑ_t+k-1, a_t+k-1)               k = 1..H, using the actions really taken
-
-L = L_action(a_t)                                     imitate the expert (expert steps only)
-  + w_s · ( |readout(z_t) − s_t|² + |readout(ẑ_t+k) − s_t+k|² )
-  + w_i · ( |decode(z_t) − img_t|² + |decode(ẑ_t+k) − img_t+k|² )
-  + w_z · |ẑ_t+k − stopgrad(encode(o_t+k))|²          keep imagination "in distribution"
-```
+mini-WAM is a minimal, beginner-friendly World Action Model (WAM). It shows how a robot policy can fuse images, text instructions and robot states to produce continuous actions, *and* predict what those actions will do to the world: the next state and the next image.
 
 > [!IMPORTANT]
-> **A world model trained only on expert demos learns to ignore actions.**
-> In expert data, `a_t` is a function of `s_t`, so `s_t+1` can be predicted
-> from `s_t` alone. The model then imagines the expert's future no matter
-> which action you ask about. You can see this happen in the "what if" plot.
-> `collect_data.py` therefore mixes in short bursts of random actions
-> (`--random-action-prob`, default 0.3). The world model learns from every
-> transition; the policy imitates only the expert ones (`is_expert`).
+> it is far from being production-ready! Purpose? Education. It is the sequel to [mini-VLA](https://github.com/keivalya/mini-vla): where mini-VLA learns `image_t + language + state_t → action_t`, mini-WAM learns `image_t + language + state_t → action_t + state_t+1 + image_t+1`.
 
-## Quickstart
+<div align="center">
+  <img src="./assets/toy_dream.gif" alt="real episode, imagined future, and dreamed future side by side">
+  <br>
+  <em>left: the real episode · middle: what mini-WAM imagines, given the real actions · right: what it dreams when its own policy acts inside its imagination</em>
+</div>
 
-```sh
-pip install -r requirements.txt
-
-# 1. collect demos in the toy world (numpy only, ~1 second)
-python -m scripts.collect_data --env toy --episodes 400 --max-steps 80 \
-  --output-path data/toy.npz
-
-# 2. train the WAM (CPU is fine)
-python -m scripts.train --dataset-path data/toy.npz \
-  --model_type wam --action_head mlp \
-  --predict_state --predict_image \
-  --epochs 12 --device cpu --save-path checkpoints/wam.pt
-
-# 3. how good is its imagination on held-out episodes?
-python -m scripts.evaluate --checkpoint checkpoints/wam.pt
-
-# 4. look inside its head
-python -m scripts.visualize_rollout --checkpoint checkpoints/wam.pt --video
-
-# 5. run it in closed loop, with a "mind's eye" video
-python -m scripts.test --checkpoint checkpoints/wam.pt --episodes 20 --save-video
-```
-
-For the mini-VLA baseline, train the same thing with `--model_type vla`.
+This project intentionally keeps the codebase small (~700 LOC for the core model) so that,
+- beginners coming from VLAs can understand the complete WAM training and imagination pipeline
+- researchers can rapidly prototype new ideas around latent world models
+- students can *look inside* a world model: decode what it imagines, ask it "what if I pushed left?", and probe what its latent space encodes
 
 > [!TIP]
-> **Meta-World.** Use `--env metaworld --env-name push-v3 --camera-name corner`
-> in `collect_data.py` (images are resized to 64×64 at collection time) and
-> `--env metaworld` in `test.py`. Everything else is the same.
+> I recommend reading the following to get started with the mini-WAM implementation.
+> - [mini-WAM: Building a World Action Model from Scratch (paper / tutorial)](docs/mini-wam-paper.md)
+> - Blog: Building a World Action Model from scratch (Basics) — **TBD**
+> - Blog: From VLAs to WAMs (Math, Code, and Intuition) — **TBD**
 
-## The toy world
+This project is not meant to be state-of-the-art. Instead, it provides a clear, hackable template for understanding WAM design.
 
-`envs/toy_point_env.py` is a 2D point mass with momentum and two colored
-goals. The instruction (`"go to the blue goal"` / `"go to the green goal"`)
-says which goal counts, so the policy has to read the language. Velocity is
-not visible in a single image, so the world model has to infer it to
-predict the next frame. The true state is just 6 numbers, which makes it easy
-to check whether the latent really encodes them.
+The mini-WAM core starts from mini-VLA's encoders and adds a world model on top:
+- [models/encoders.py](models/encoders.py) encodes images (TinyCNN or spatial-softmax keypoints), text and robot states
+- [models/fusion.py](models/fusion.py) combines them with an MLP into one latent world state `z_t`
+- [models/action_heads.py](models/action_heads.py) turns `z_t` into an action (MLP, diffusion, or flow matching)
+- [models/dynamics_head.py](models/dynamics_head.py) holds the world model: `LatentDynamicsMLP` predicts `z_t+1` from `(z_t, a_t)`, and a *linear* `StateReadout` reads the physical state back out of any latent
+- [models/image_decoder.py](models/image_decoder.py) turns any latent, real or imagined, back into an image
+- [models/losses.py](models/losses.py) adds up the action, state, image and latent-consistency losses
+- [models/wam_policy.py](models/wam_policy.py) combines everything, including `imagine()` to roll the world forward in latent space
 
-## Looking inside the world model
+Additionally, I provide scripts:
+- [scripts/collect_data.py](scripts/collect_data.py) collects data with an expert policy, plus a few random-action bursts so the world model learns what actions do
+- [scripts/train.py](scripts/train.py) trains the WAM (or the mini-VLA baseline with `--model_type vla`)
+- [scripts/evaluate.py](scripts/evaluate.py) measures how well the WAM imagines held-out futures, including counterfactual "what if" actions
+- [scripts/visualize_rollout.py](scripts/visualize_rollout.py) shows what the world model believes (imagination strips, latent maps, what-if plots, keypoints)
+- [scripts/test.py](scripts/test.py) tests the policy in sim and saves "mind's eye" videos
+- [scripts/run_toy.sh](scripts/run_toy.sh) runs the full pipeline over three seeds
 
-`scripts/visualize_rollout.py` writes these figures for held-out episodes:
 
-| figure | question it answers |
-|---|---|
-| `1_imagination.png` | real frames vs. reconstructed, imagined (open-loop, real actions) and dreamed (own policy) frames |
-| `2_beliefs.png` | for each state variable: the truth, what the latent says now, and what it imagined from t=0 |
-| `3_latent_map.png` | PCA map of the latent space with real vs. imagined trajectories, plus which latent directions correlate with which physical quantities |
-| `4_what_if.png` | counterfactuals: same start, 9 different pushes. Where does the WAM think the agent goes? (toy: compared against the true simulator) |
-| `5_horizon.png` | imagination error vs. number of imagined steps, against a "nothing changes" baseline; readout R² per variable |
-| `6_keypoints.png` | what the spatial-softmax image encoder is tracking |
-| `dream.mp4` | real vs. imagined vs. dreamed video |
+# Video
 
-`scripts/evaluate.py` prints the same numbers and saves them as JSON.
+**TBD**: a video walkthrough of mini-WAM is coming soon.
 
-### Why is the latent interpretable?
+## Getting started
 
-* `StateReadout` is **linear** by default. If a linear map recovers agent
-  position and velocity from `z`, then those quantities are explicitly
-  encoded in the latent, and the readout weights say which directions mean what.
-  (`--mlp_readout` swaps in an MLP if you want a stronger, less interpretable decoder.)
-* The **readout is shared** between real and imagined latents, so imagined
-  latents can be read with the same "dictionary" as real ones.
-* The **image encoder** (`--image_encoder keypoints`) uses a spatial softmax:
-  each channel becomes an (x, y) location you can draw on the image.
+Create (or activate) a conda environment
 
-> [!NOTE]
-> `state_t` is also an input, so reading `s_t` back out of the real `z_t` is
-> easy. The interesting readouts are of *imagined* latents (k ≥ 1), which have
-> never seen the future state.
+```
+conda create --name mini-wam python=3.11
+conda activate mini-wam
+```
 
-## Status
+Clone mini-WAM project
 
-| piece | status |
-|---|---|
-| image + language + state → action (mlp / diffusion / flow) | ✅ |
-| → state_t+1 (action-conditioned latent dynamics + linear readout) | ✅ |
-| → image_t+1 (latent → image decoder) | ✅ |
-| multi-step imagination & dreaming | ✅ |
-| toy env, Meta-World MT1 | ✅ |
-| `envs/mujoco_env.py`, `envs/wrappers.py`, `configs/`, `scripts/inference.py` | 🚧 not yet |
+```
+git clone https://github.com/keivalya/mini-wam.git
+cd mini-wam
+```
+
+Install dependencies
+
+```
+pip install -r requirements.txt
+```
+
+## Collect demonstration data
+
+This gathers trajectories with an expert policy in a tiny 2D toy world (numpy only, seconds on a laptop) and saves them in a `.npz` dataset. 30% of the time, the expert hands over to a short burst of random actions, so the world model sees actions the expert would never take.
+
+```
+python -m scripts.collect_data \
+  --env toy \
+  --episodes 400 \
+  --max-steps 80 \
+  --output-path data/toy.npz
+```
+
+> [!TIP]
+> For Meta-World, use `--env metaworld --env-name push-v3 --camera-name corner` (images are resized to 64×64 when collecting).
+
+## Train your WAM model
+
+Train the policy and the world model together on your collected dataset.
+
+```
+python -m scripts.train \
+  --dataset-path data/toy.npz \
+  --model_type wam \
+  --action_head mlp \
+  --predict_state \
+  --predict_image \
+  --epochs 15 \
+  --save-path checkpoints/wam.pt \
+  --device cpu
+```
+
+Train the mini-VLA baseline on the same data with `--model_type vla` (and drop `--predict_state --predict_image`).
+
+## Test your model in sim
+
+Run the trained WAM in the toy world on unseen seeds. With `--save-video`, every frame shows the real observation next to what the model believes now and what it expects a few steps ahead.
+
+```
+python -m scripts.test \
+  --checkpoint checkpoints/wam.pt \
+  --episodes 20 \
+  --device cpu \
+  --save-video \
+  --video-dir videos
+```
+
+## Look inside the world model
+
+Measure how well it imagines held-out futures (and "what if" futures under random actions), then visualize what it believes.
+
+```
+python -m scripts.evaluate --checkpoint checkpoints/wam.pt
+python -m scripts.visualize_rollout --checkpoint checkpoints/wam.pt --video
+```
+
+## Reproduce the paper
+
+Each experiment in [the paper](docs/mini-wam-paper.md) is `scripts/run_toy.sh` with one line of its config block changed. It runs collection, WAM + VLA training, evaluation and closed-loop tests over three seeds.
+
+```
+bash scripts/run_toy.sh
+```
+
+A few things the paper found on the toy world:
+- the world model imagines 15 steps ahead with ~80× less state error than assuming nothing changes
+- trained on expert demos alone, it predicts what happened *better* but understands other actions **15× worse**
+- from pixels alone (no state input), world modeling more than doubles closed-loop success (80% vs. 36%)
+
+## Inference (coming soon)
+
+Planning to,
+- plan with the world model: imagine candidate action sequences and pick the best (MPC)
+- run the full study on Meta-World — **TBD**
+- a standalone inference script with arbitrary text input — **TBD**
+- blogs, tutorials and a video walkthrough — **TBD**
