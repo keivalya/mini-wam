@@ -280,6 +280,18 @@ Two lessons I'd carry to big WAMs:
 2. **The policy does not care, yet.** All three settings reach 100% success, and the policy only imitates expert steps, so exploration data cost nothing here. The world model needs action diversity; the policy needs expert quality. Tagging transitions (`is_expert`) lets one dataset serve both.
 
 ### 5.4 Which parts of the objective matter?
+
+Next I removed one piece of the objective at a time, and changed the length $H$ of the imagined windows used in training.
+
+![Ablations](figures/fig-ablations.svg)
+
+*Figure 5. **The training horizon matters most; the latent-consistency and image losses matter little on this task.** Each row changes one thing relative to the full objective (grey). (a) Imagined state error after 15 steps. (b) Counterfactual error after 10 random-action steps. (c) Closed-loop success. (d) Image error after 1 step. For "no image loss" the decoder is untrained, so (d) is meaningless there. Mean ± std over 3 seeds.*
+
+* **Imagination horizon is the big knob.** Training on one-step transitions ($H=1$) gives the same one-step accuracy as $H=5$ ($0.0019$ in both cases), but the errors compound: after 10 counterfactual steps the error doubles ($0.0139 \pm 0.0008$ vs. $0.0072 \pm 0.0005$). Training on longer windows ($H=10$) goes the other way. Long-range imagination improves ($0.0057 \pm 0.0005$ at $k=10$; $0.0046 \pm 0.0007$ state error at $k=15$), and short-range gets a bit worse ($0.0030 \pm 0.0003$ at $k=1$). *You get good at the horizon you train on.* This is the same trade-off as single-step vs. multi-step ("rollout") losses in model-based RL.
+* **The latent-consistency loss buys stability, not accuracy.** Without it, short imaginations are slightly *better* ($0.0016$ vs. $0.0019$ at $k=1$), but 15-step imaginations are worse and much less consistent across seeds ($0.0096 \pm 0.0024$ vs. $0.0071 \pm 0.0004$).
+* **The image loss is not what makes the latent good here.** Removing it leaves every state metric within noise ($0.0074 \pm 0.0021$ vs. $0.0071 \pm 0.0004$ at $k=15$). That is not a general statement about pixels: in this task the state is an input, so the latent can learn the world from the state alone. §5.5 removes that crutch.
+* **None of it changes the policy.** All variants reach 99–100% closed-loop success.
+
 ### 5.5 When does a world model help the policy?
 ### 5.6 Looking inside the world model
 
