@@ -28,6 +28,14 @@ can *look inside*: watch the model imagine the future, ask it "what if I
 pushed left instead?", and check which latent directions mean "where is
 the agent" or "how fast is it moving".
 
+## Read the paper
+
+**[mini-WAM: Building a World Action Model from Scratch](docs/mini-wam-paper.md)** walks through the whole model for people coming from VLAs, with a small three-seed study on the toy world. Main findings:
+
+* The latent world model imagines 15 steps ahead with ~80× less state error than "nothing changes", and every imagined latent is linearly readable.
+* Trained on expert demos only, it predicts what happened *better* but understands other actions **15× worse**. A few random-action bursts in the data fix it.
+* With the state as input, world modeling doesn't help the policy. From **pixels alone** it more than doubles closed-loop success (80% vs. 36%), because imagination recovers the velocity a single frame can't show.
+
 ## The model in one picture
 
 ```text
