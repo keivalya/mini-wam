@@ -7,7 +7,7 @@
 mini-WAM is a minimal, beginner-friendly World Action Model (WAM). It shows how a robot policy can fuse images, text instructions and robot states to produce continuous actions, *and* predict what those actions will do to the world: the next state and the next image.
 
 > [!IMPORTANT]
-> it is far from being production-ready! Purpose? Education. It is the sequel to [mini-VLA](https://github.com/keivalya/mini-vla): where mini-VLA learns `image_t + language + state_t → action_t`, mini-WAM learns `image_t + language + state_t → action_t + state_t+1 + image_t+1`.
+> it is far from being production-ready! Purpose? Education. A VLA learns `image_t + language + state_t → action_t`; mini-WAM learns `image_t + language + state_t → action_t + state_t+1 + image_t+1`. (Inspired by, and extending, [mini-VLA](https://github.com/keivalya/mini-vla).)
 
 <div align="center">
   <img src="./assets/toy_dream.gif" alt="real episode, imagined future, and dreamed future side by side">
@@ -28,7 +28,7 @@ This project intentionally keeps the codebase small (~700 LOC for the core model
 
 This project is not meant to be state-of-the-art. Instead, it provides a clear, hackable template for understanding WAM design.
 
-The mini-WAM core starts from mini-VLA's encoders and adds a world model on top:
+The mini-WAM core is a VLA-style policy with a world model on top:
 - [models/encoders.py](models/encoders.py) encodes images (TinyCNN or spatial-softmax keypoints), text and robot states
 - [models/fusion.py](models/fusion.py) combines them with an MLP into one latent world state `z_t`
 - [models/action_heads.py](models/action_heads.py) turns `z_t` into an action (MLP, diffusion, or flow matching)
@@ -39,7 +39,7 @@ The mini-WAM core starts from mini-VLA's encoders and adds a world model on top:
 
 Additionally, I provide scripts:
 - [scripts/collect_data.py](scripts/collect_data.py) collects data with an expert policy, plus a few random-action bursts so the world model learns what actions do
-- [scripts/train.py](scripts/train.py) trains the WAM (or the mini-VLA baseline with `--model_type vla`)
+- [scripts/train.py](scripts/train.py) trains the WAM (or a VLA baseline without the world model, `--model_type vla`)
 - [scripts/evaluate.py](scripts/evaluate.py) measures how well the WAM imagines held-out futures, including counterfactual "what if" actions
 - [scripts/visualize_rollout.py](scripts/visualize_rollout.py) shows what the world model believes (imagination strips, latent maps, what-if plots, keypoints)
 - [scripts/test.py](scripts/test.py) tests the policy in sim and saves "mind's eye" videos
@@ -103,7 +103,7 @@ python -m scripts.train \
   --device cpu
 ```
 
-Train the mini-VLA baseline on the same data with `--model_type vla` (and drop `--predict_state --predict_image`).
+Train a VLA baseline (same encoders, no world model) on the same data with `--model_type vla` (and drop `--predict_state --predict_image`).
 
 ## Test your model in sim
 
