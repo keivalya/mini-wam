@@ -42,7 +42,7 @@ This paper is my attempt to answer those questions at a scale where you can watc
 
 1. **A minimal WAM** (§3). mini-VLA plus three small modules: latent dynamics, a linear state readout and an image decoder, all on one shared latent. Each new module is under 100 lines.
 2. **A toy world built for understanding** (§4). A 2D point mass with momentum and two language-selected goals. It steps and renders in a fraction of a millisecond, and its true state is six numbers, so we can check exactly what the latent encodes.
-3. **Tools for looking inside** (§5.6): imagination strips, belief traces, a latent map, "what if" counterfactuals and an error-vs-horizon curve.
+3. **Tools for looking inside** (§5.5): imagination strips, belief traces, a latent map, "what if" counterfactuals and an error-vs-horizon curve.
 4. **A small but careful study** (§5). Three seeds per configuration, held-out episodes, and ablations of the data, the loss terms and the imagination horizon. It also includes the experiment that made me rethink the data: a world model trained only on expert demos *learns to ignore the action*.
 
 > **A note on the name.** While writing this I found an unrelated paper also called *MiniWAM* ([Chen et al., 2026](https://www.alphaxiv.org/abs/2610.12194)). It is a 0.25B-parameter model that predicts compact learned future representations instead of native visual features. This project (mini-WAM, with a hyphen) is an educational from-scratch implementation and is not connected to that work.
@@ -252,7 +252,7 @@ Yes, at the level of the state, and no, at the level of pixels.
 * **States.** Fifteen steps into an open-loop imagination, the state error is $0.0071 \pm 0.0004$, about 80× lower than the "nothing changes" baseline ($0.582 \pm 0.015$). A linear readout recovers every state variable from the imagined latent with $R^2 \ge 0.977$ (mean $0.992 \pm 0.001$) at $k=15$.
 * **Actions.** Under random action sequences the expert never produced, the error after 10 steps is $0.0072 \pm 0.0005$, versus $0.388 \pm 0.001$ for a model that ignored the actions. So the world model has learned what actions *do*, not just what the expert usually did.
 * **Pixels.** The decoded imagination is *worse* than just copying the current frame at every horizon ($0.0073$ vs. $0.0050$ at $k=15$). Figure 3 shows why: the decoder draws the agent and the instructed goal, but drops the distractor goal. I come back to this in §6.
-* **The policy.** Both mini-WAM and mini-VLA succeed on 100% of test episodes in all three seeds (26.4 vs. 26.1 steps on average). This task is too easy to separate them; §5.5 makes it harder.
+* **The policy.** Both mini-WAM and mini-VLA succeed on 100% of test episodes in all three seeds (26.4 vs. 26.1 steps on average). This task is too easy to separate them; §5.6 makes it harder.
 
 ![Imagination strip](figures/imagination-strip.png)
 
@@ -266,7 +266,7 @@ This is the experiment that taught me the most. I trained three world models tha
 
 *Figure 4. **Trained on expert demos alone, the world model is great at predicting what happened and poor at predicting anything else.** (a) Imagined state error after 10 steps with the real actions (factual, green) and with random actions compared to the true simulator (counterfactual, orange). Grey: the error of a model that ignores the actions altogether. (b) Closed-loop success. Mean ± std over 3 seeds.*
 
-With expert-only data the factual error is the *lowest* of the three settings ($0.0047 \pm 0.0025$ at $k=15$, vs. $0.0071 \pm 0.0004$ with 30% exploration). If factual prediction were all you checked, you would conclude expert-only data is best. The counterfactual error says otherwise: $0.112 \pm 0.005$ at $k=10$, **15× worse** than with exploration ($0.0072 \pm 0.0005$). It is still better than ignoring actions entirely (0.295), so the model uses the action a little, but mostly it has learned *"the expert will drive toward the goal"*.
+With expert-only data the factual error is the *lowest* of the three settings ($0.0047 \pm 0.0025$ at $k=15$, vs. $0.0071 \pm 0.0004$ with 30% exploration). If factual prediction were all you checked, you would conclude expert-only data is best. The counterfactual error says otherwise: $0.112 \pm 0.005$ at $k=10$, **15× worse** than with exploration ($0.0072 \pm 0.0005$). It is still better than ignoring actions entirely (0.295), so the model uses the action a little. My reading is that mostly it has learned *"the expert will drive toward the goal"*.
 
 Why? In expert data the action is a deterministic-ish function of the state, $a_t \approx \pi^*(s_t)$, so
 
@@ -289,42 +289,10 @@ Next I removed one piece of the objective at a time, and changed the length $H$ 
 
 * **Imagination horizon is the big knob.** Training on one-step transitions ($H=1$) gives the same one-step accuracy as $H=5$ ($0.0019$ in both cases), but the errors compound: after 10 counterfactual steps the error doubles ($0.0139 \pm 0.0008$ vs. $0.0072 \pm 0.0005$). Training on longer windows ($H=10$) goes the other way. Long-range imagination improves ($0.0057 \pm 0.0005$ at $k=10$; $0.0046 \pm 0.0007$ state error at $k=15$), and short-range gets a bit worse ($0.0030 \pm 0.0003$ at $k=1$). *You get good at the horizon you train on.* This is the same trade-off as single-step vs. multi-step ("rollout") losses in model-based RL.
 * **The latent-consistency loss buys stability, not accuracy.** Without it, short imaginations are slightly *better* ($0.0016$ vs. $0.0019$ at $k=1$), but 15-step imaginations are worse and much less consistent across seeds ($0.0096 \pm 0.0024$ vs. $0.0071 \pm 0.0004$).
-* **The image loss is not what makes the latent good here.** Removing it leaves every state metric within noise ($0.0074 \pm 0.0021$ vs. $0.0071 \pm 0.0004$ at $k=15$). That is not a general statement about pixels: in this task the state is an input, so the latent can learn the world from the state alone. §5.5 removes that crutch.
+* **The image loss is not what makes the latent good here.** Removing it leaves every state metric within noise ($0.0074 \pm 0.0021$ vs. $0.0071 \pm 0.0004$ at $k=15$). That is not a general statement about pixels: in this task the state is an input, so the latent can learn the world from the state alone. §5.6 removes that crutch.
 * **None of it changes the policy.** All variants reach 99–100% closed-loop success.
 
-### 5.5 When does a world model help the policy?
-
-Up to now the policy never benefited: mini-VLA was already at 100%. I tried two ways of making the task harder for the *policy*: fewer demonstrations, and taking away the state input.
-
-![Data and state input](figures/fig-data-and-state.svg)
-
-*Figure 10. **The world-model objective hurts with very few demos, and helps a lot when the state must be inferred from pixels.** (a) Closed-loop success vs. number of demonstration episodes (15 epochs each). Open markers: the same 25 episodes trained ~15× longer, to match the baseline's number of gradient steps. (b) Success with and without the state input (400 episodes). Mean ± std over 3 seeds; 100 test episodes per seed.*
-
-**Few demonstrations: the WAM is *worse*.** With 25 episodes per seed, mini-WAM succeeds $87.0 \pm 7.8\%$ of the time vs. $99.7 \pm 0.5\%$ for mini-VLA. With 50 episodes the gap shrinks ($96.7 \pm 2.6\%$ vs. $99.7 \pm 0.5\%$), and with 100 it is gone ($100\%$ vs. $99.7 \pm 0.5\%$). One confound is training length. All runs use 15 epochs, so 25 episodes means about 1/16 of the baseline's gradient steps, and the WAM has more to learn in those steps. To check, I trained the same 25-episode datasets for 225 epochs, roughly the baseline's number of gradient steps. The gap mostly closes: $96.3 \pm 1.2\%$ for mini-WAM vs. $98.7 \pm 1.9\%$ for mini-VLA. So most of the low-data penalty was *undertraining*: the WAM has four losses to fit and needs more steps to get its policy right. What remains is small, and within about one standard deviation. Training longer does expose a new problem, though. The world model overfits 22 training episodes badly (image loss 0.0005 on training data vs. 0.016 on held-out episodes; imagined-state $R^2$ at $k=15$ only $0.72 \pm 0.17$). A world model needs far more data than a policy to be good.
-
-**No state input: the WAM is much *better*.** When both models see only the image and the instruction, mini-WAM succeeds $80.3 \pm 12.0\%$ of the time and mini-VLA only $36.0 \pm 19.8\%$ (mean episode length 32.5 vs. 60.1 steps). The spread across seeds is large, but the WAM is ahead in every seed (WAM/VLA success: 97/23, 69/64 and 75/21%).
-
-Why does the world model help so much here? The probe gives a clean answer. Velocity is invisible in a single frame, and it matters: the agent has momentum, and the expert brakes before the goal. Look at the linear readout of mini-WAM's latent:
-
-| readout $R^2$ | position $(x, y)$ | velocity $(v_x, v_y)$ |
-|---|---|---|
-| encoded current frame ($k=0$) | 0.994 / 0.993 | **0.47 / 0.50** |
-| after 1 imagined step | 0.994 / 0.992 | 0.69 / 0.71 |
-| after 5 imagined steps | 0.985 / 0.981 | **0.92 / 0.93** |
-
-*(Image-only run, mean of 3 seeds; full numbers in `docs/results/image-only`.)*
-
-From pixels alone, the latent knows *where* the agent is but only about half of *how fast* it is going. After a few imagined steps it knows velocity well, because the dynamics model integrates the actions it was given. If you have built a Kalman filter, this is the *predict* step: a motion model plus known controls recovers a state you cannot observe directly. The WAM is forced to learn that motion model; the VLA is not.
-
-The keypoints tell the same story (Figure 11). Without the state input, the spatial-softmax keypoints that had collapsed to the image center in the baseline (Figure 9) now lock onto the agent and the goals.
-
-![Keypoints, image only](figures/keypoints-image-only.png)
-
-*Figure 11. **Without the state input, the encoder learns to look.** Several keypoints follow the red agent; others sit on the goals. Seed 0 of the image-only run.*
-
-One caveat: mini-WAM's *policy* still acts on the encoding of the current frame. It never uses the imagined velocity at test time. So the benefit comes from training: predicting the future forces the shared encoder to represent things, like motion cues, that help the policy as well. A policy that consumes the imagination directly, or a short history of frames, would probably do better still. I have not tested either.
-
-### 5.6 Looking inside the world model
+### 5.5 Looking inside the world model
 
 The numbers above say the latent world model works. The figures in this section show *what it believes*. All are produced by `scripts/visualize_rollout.py` for seed 0 of the baseline.
 
@@ -346,11 +314,43 @@ The numbers above say the latent world model works. The figures in this section 
 
 *Figure 8. **The latent is organized by goal location first, velocity later.** Left: PCA of held-out latents, colored by episode progress, with one real (black) and imagined (orange) trajectory. Right: correlation of each principal component with each state variable. Seed 0.*
 
-**What does the image encoder look at? Nothing, apparently.** Figure 9 draws the 16 spatial-softmax keypoints. They all sit at the image center, which means the heatmaps are nearly flat. My interpretation: the state input already tells the model where the agent and goal are, so the image encoder has no pressure to localize anything. The image-only experiment in §5.5 tests this.
+**What does the image encoder look at? Nothing, apparently.** Figure 9 draws the 16 spatial-softmax keypoints. They all sit at the image center, which means the heatmaps are nearly flat. My interpretation: the state input already tells the model where the agent and goal are, so the image encoder has no pressure to localize anything. The image-only experiment in §5.6 tests this.
 
 ![Keypoints](figures/keypoints.png)
 
 *Figure 9. **With the state as input, the keypoint encoder learns nothing spatial.** The 16 keypoints collapse to the image center. Seed 0 of the baseline.*
+
+### 5.6 When does a world model help the policy?
+
+Up to now the policy never benefited: mini-VLA was already at 100%. I tried two ways of making the task harder for the *policy*: fewer demonstrations, and taking away the state input.
+
+![Data and state input](figures/fig-data-and-state.svg)
+
+*Figure 10. **The world-model objective hurts with very few demos, and helps a lot when the state must be inferred from pixels.** (a) Closed-loop success vs. number of demonstration episodes (15 epochs each). Open markers: the same 25 episodes trained ~15× longer, to match the baseline's number of gradient steps. (b) Success with and without the state input (400 episodes). Mean ± std over 3 seeds; 100 test episodes per seed.*
+
+**Few demonstrations: the WAM is *worse*.** With 25 episodes per seed, mini-WAM succeeds $87.0 \pm 7.8\%$ of the time vs. $99.7 \pm 0.5\%$ for mini-VLA. With 50 episodes the gap shrinks ($96.7 \pm 2.6\%$ vs. $99.7 \pm 0.5\%$), and with 100 it is gone ($100\%$ vs. $99.7 \pm 0.5\%$). One confound is training length. All runs use 15 epochs, so 25 episodes means about 1/16 of the baseline's gradient steps, and the WAM has more to learn in those steps. To check, I trained the same 25-episode datasets for 225 epochs, roughly the baseline's number of gradient steps. The gap mostly closes: $96.3 \pm 1.2\%$ for mini-WAM vs. $98.7 \pm 1.9\%$ for mini-VLA. So most of the low-data penalty was *undertraining*, presumably because the WAM has four losses to fit with the same encoder and needs more steps to get its policy right. What remains is small, and within about one standard deviation. Training longer does expose a new problem, though. The world model overfits 22 training episodes badly (image loss 0.0005 on training data vs. 0.016 on held-out episodes; imagined-state $R^2$ at $k=15$ only $0.72 \pm 0.17$). Here, at least, the world model needed far more data than the policy.
+
+**No state input: the WAM is much *better*.** When both models see only the image and the instruction, mini-WAM succeeds $80.3 \pm 12.0\%$ of the time and mini-VLA only $36.0 \pm 19.8\%$ (mean episode length 32.5 vs. 60.1 steps). The spread across seeds is large, but the WAM is ahead in every seed (WAM/VLA success: 97/23, 69/64 and 75/21%).
+
+Why does the world model help so much here? The probe gives a clean answer. Velocity is invisible in a single frame, and it matters: the agent has momentum, and the expert brakes before the goal. Look at the linear readout of mini-WAM's latent:
+
+| readout $R^2$ | position $(x, y)$ | velocity $(v_x, v_y)$ |
+|---|---|---|
+| encoded current frame ($k=0$) | 0.994 / 0.993 | **0.47 / 0.50** |
+| after 1 imagined step | 0.994 / 0.992 | 0.69 / 0.71 |
+| after 5 imagined steps | 0.985 / 0.981 | **0.92 / 0.93** |
+
+*(Image-only run, mean of 3 seeds; full numbers in `docs/results/image-only`.)*
+
+From pixels alone, the latent knows *where* the agent is but only about half of *how fast* it is going. After a few imagined steps it knows velocity well, because the dynamics model integrates the actions it was given. If you have built a Kalman filter, this is the *predict* step: a motion model plus known controls recovers a state you cannot observe directly. The WAM is forced to learn that motion model; the VLA is not.
+
+The keypoints tell the same story (Figure 11). Without the state input, the spatial-softmax keypoints that had collapsed to the image center in the baseline (Figure 9) now lock onto the agent and the goals.
+
+![Keypoints, image only](figures/keypoints-image-only.png)
+
+*Figure 11. **Without the state input, the encoder learns to look.** Several keypoints follow the red agent; others sit on the goals. Seed 0 of the image-only run.*
+
+One caveat: mini-WAM's *policy* still acts on the encoding of the current frame. It never uses the imagined velocity at test time. My interpretation is that the benefit comes from training: predicting the future forces the shared encoder to represent things, like motion cues, that help the policy as well. I have not isolated this mechanism. A policy that consumes the imagination directly, or a short history of frames, would probably do better still. I have not tested either.
 
 ## 6. Discussion and lessons
 
@@ -366,7 +366,7 @@ Here is what I would tell someone moving from VLAs to WAMs, based on what this s
 
 **5. Pixels are an expensive and misleading target.** mini-WAM's decoded imagination was worse than copying the frame, mostly because it drops the distractor goal, an object that is irrelevant to the instructed task. Meanwhile the *state* of the imagination was excellent. Large WAMs face the same tension at scale. Chen et al.'s MiniWAM, for example, predicts compact learned future representations instead of native visual features and reports that this is both cheaper and better for policy learning ([MiniWAM](https://www.alphaxiv.org/abs/2610.12194)). The survey puts the general point well: "This separation can create a mismatch between predictive fidelity and control utility: visually plausible futures are not necessarily actionable, and accurate short-horizon prediction does not guarantee robust long-horizon behavior" ([Survey](https://www.alphaxiv.org/abs/2609.16074)).
 
-**6. A world-model objective does not automatically make a better policy, but it helps when the policy has to infer something.** When the state was given, the WAM's policy was never better than the VLA's. With very few demos it was worse, mostly because it needed more training steps (§5.5). When the state had to be inferred from pixels, the WAM more than doubled the success rate ($80\%$ vs. $36\%$), and the probe shows why: learning to predict the future forces the latent to model motion, which a single frame does not show. My takeaway is that world modeling pays off when there is *hidden state* the future depends on. That describes most real robot problems (occlusion, contact forces, object properties), and it describes very little of a fully observed toy world.
+**6. A world-model objective does not automatically make a better policy, but it helps when the policy has to infer something.** When the state was given, the WAM's policy was never better than the VLA's. With very few demos it was worse, mostly because it needed more training steps (§5.6). When the state had to be inferred from pixels, the WAM more than doubled the success rate ($80\%$ vs. $36\%$), and the probe shows why: learning to predict the future forces the latent to model motion, which a single frame does not show. My takeaway is that world modeling pays off when there is *hidden state* the future depends on. That describes most real robot problems (occlusion, contact forces, object properties), and it describes very little of a fully observed toy world.
 
 ### Limitations
 
