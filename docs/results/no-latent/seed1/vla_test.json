@@ -1,0 +1,6 @@
+{
+  "success_rate": 1.0,
+  "episodes": 100,
+  "mean_steps": 26.39,
+  "seed": 11000
+}
