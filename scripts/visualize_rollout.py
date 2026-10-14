@@ -38,6 +38,7 @@ from scripts.evaluate import (
     get_episode,
     encode_episode,
     evaluate,
+    resolve_device,
 )
 
 
@@ -387,6 +388,7 @@ def save_dream_video(model, ep, imag, dream, out_dir):
 
 def main():
     args = parse_args()
+    args.device = resolve_device(args.device)
     model, ckpt, data = load_model_and_data(args.checkpoint, args.dataset_path, args.device)
     if not model.is_wam:
         raise SystemExit("This checkpoint is a VLA (no world model); nothing to visualize.")
