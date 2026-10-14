@@ -40,8 +40,8 @@ The same survey defines WAMs as "predictive control models that connect future-s
 
 This paper is my attempt to answer those questions at a scale where you can watch everything happen. My contributions are:
 
-1. **A minimal WAM** (§3). mini-VLA plus three small modules: latent dynamics, a linear state readout and an image decoder, all on one shared latent. Every module is a few dozen lines.
-2. **A toy world built for understanding** (§4). A 2D point mass with momentum and two language-selected goals. It renders in microseconds, and its true state is six numbers, so we can check exactly what the latent encodes.
+1. **A minimal WAM** (§3). mini-VLA plus three small modules: latent dynamics, a linear state readout and an image decoder, all on one shared latent. Each new module is under 100 lines.
+2. **A toy world built for understanding** (§4). A 2D point mass with momentum and two language-selected goals. It steps and renders in a fraction of a millisecond, and its true state is six numbers, so we can check exactly what the latent encodes.
 3. **Tools for looking inside** (§5.6): imagination strips, belief traces, a latent map, "what if" counterfactuals and an error-vs-horizon curve.
 4. **A small but careful study** (§5). Three seeds per configuration, held-out episodes, and ablations of the data, the loss terms and the imagination horizon. It also includes the experiment that made me rethink the data: a world model trained only on expert demos *learns to ignore the action*.
 
@@ -203,7 +203,7 @@ The bold rows are what a WAM adds to a VLA. Two-thirds of the extra parameters a
 
 mini-WAM runs on Meta-World too (`--env metaworld`), but for *understanding* a world model I wanted three things Meta-World doesn't give cheaply:
 
-1. **Fast:** thousands of episodes in a second on a laptop CPU.
+1. **Fast:** 400 episodes are collected in a few seconds on a laptop CPU.
 2. **Fully known state:** so "does the latent encode the world?" has a precise answer.
 3. **A true simulator for counterfactuals:** so we can ask the model "what if I had pushed left?" and check the answer.
 
