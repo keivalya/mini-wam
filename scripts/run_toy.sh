@@ -89,7 +89,7 @@ for SEED in $SEEDS; do
     --seed $((42 + 1000 * SEED)) --random-action-prob "$RANDOM_ACTION_PROB" \
     --output-path "$R/toy.npz" | tail -3
 
-  # 2. WAM and the mini-VLA baseline (same data, same action head, same seed)
+  # 2. WAM and the VLA baseline (same data, same action head, same seed)
   $PYV -m scripts.train --dataset-path "$R/toy.npz" --model_type wam --action_head "$ACTION_HEAD" \
     --predict_state --predict_image $STATE_FLAG --horizon "$HORIZON" \
     --state-weight "$STATE_WEIGHT" --image-weight "$IMAGE_WEIGHT" --latent-weight "$LATENT_WEIGHT" \

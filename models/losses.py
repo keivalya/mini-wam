@@ -1,4 +1,4 @@
-"""Training losses for mini-VLA / mini-WAM.
+"""Training losses for mini-WAM (and its VLA baseline).
 
 VLA:
     L = w_a * L_action

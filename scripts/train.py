@@ -1,4 +1,4 @@
-"""Train mini-WAM / mini-VLA on image, state, action, and text-instruction datasets.
+"""Train mini-WAM (or its VLA baseline) on image, state, action, and text-instruction datasets.
 
 Expected dataset format: .npz with at least:
 
@@ -175,7 +175,7 @@ def parse_args():
         type=str,
         default="keypoints",
         choices=["cnn", "keypoints"],
-        help="cnn = mini-VLA TinyCNN (global pooling); keypoints = spatial-softmax CNN",
+        help="cnn = small CNN with global pooling; keypoints = spatial-softmax CNN",
     )
 
     parser.add_argument("--predict_state", action="store_true")

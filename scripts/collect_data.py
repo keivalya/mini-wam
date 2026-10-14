@@ -3,7 +3,7 @@
     --env toy        2D point-mass world (numpy only, seconds on a laptop)
     --env metaworld  Meta-World MT1 task with its scripted expert
 
-mini-VLA data:
+VLA data:
     observation_t -> action_t
 
 mini-WAM data:

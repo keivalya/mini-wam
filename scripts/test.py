@@ -1,4 +1,4 @@
-"""Test a mini-WAM / mini-VLA policy in closed loop (toy env or Meta-World MT1).
+"""Test a mini-WAM (or VLA baseline) policy in closed loop (toy env or Meta-World MT1).
 
 With --save-video, every frame of a WAM rollout shows what the model sees
 and what it is thinking:
