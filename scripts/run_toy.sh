@@ -20,20 +20,34 @@ if command -v module >/dev/null 2>&1 && [ -n "${MINI_WAM_MODULES:-}" ]; then
   module load $MINI_WAM_MODULES
 fi
 
+# CPU-only torch wheels unless this machine has an NVIDIA GPU (much smaller install)
+if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
+  TORCH_INDEX="https://download.pytorch.org/whl/cu124"
+else
+  TORCH_INDEX="https://download.pytorch.org/whl/cpu"
+fi
+
 if [ -n "${MINI_WAM_PY:-}" ]; then
   PYV="$MINI_WAM_PY"
 else
-  PKG_HASH="$(echo "$PKGS $($PY --version 2>&1)" | cksum | cut -d' ' -f1)"
+  if command -v uv >/dev/null 2>&1; then
+    PY_SPEC="${UV_PYTHON_VERSION:-3.11}"      # uv fetches this Python if needed
+  else
+    PY_SPEC="$($PY --version 2>&1)"
+  fi
+  PKG_HASH="$(echo "$PKGS $PY_SPEC $TORCH_INDEX" | cksum | cut -d' ' -f1)"
   VENV="$HOME/.cache/mini-wam/venv-$PKG_HASH"
   if [ ! -x "$VENV/bin/python" ]; then
-    echo "[run] creating venv $VENV with $($PY --version 2>&1)"
+    echo "[run] creating venv $VENV (python $PY_SPEC, torch from $TORCH_INDEX)"
     mkdir -p "$(dirname "$VENV")"
     if command -v uv >/dev/null 2>&1; then
-      uv venv "$VENV" --python "$PY"
+      uv venv "$VENV" --python "$PY_SPEC"
+      VIRTUAL_ENV="$VENV" uv pip install torch --index-url "$TORCH_INDEX"
       VIRTUAL_ENV="$VENV" uv pip install $PKGS
     else
       "$PY" -m venv "$VENV"
       "$VENV/bin/pip" install --upgrade pip
+      "$VENV/bin/pip" install torch --index-url "$TORCH_INDEX"
       "$VENV/bin/pip" install $PKGS
     fi
   fi
@@ -43,6 +57,7 @@ export PYTHONUNBUFFERED=1
 
 echo "[run] host=$(hostname) python=$($PYV --version) torch=$($PYV -c 'import torch; print(torch.__version__, "cuda" if torch.cuda.is_available() else "cpu")')"
 echo "[run] git commit: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+echo "[run] cpus: $(nproc) slurm_job=${SLURM_JOB_ID:-none}"
 echo "[run] config: EPOCHS=$EPOCHS EPISODES=$EPISODES SEED=$SEED DEVICE=$DEVICE"
 
 # ---- 1. data
