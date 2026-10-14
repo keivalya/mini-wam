@@ -128,7 +128,6 @@ class DiffusionPolicyHead(nn.Module):
         cond: (B, cond_dim) or (1, cond_dim)
         returns: (B, action_dim) sampled actions x_0
         """
-        self.eval()
         if n_samples is None:
             B = cond.size(0)
         else:
