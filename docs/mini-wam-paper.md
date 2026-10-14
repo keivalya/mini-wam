@@ -226,13 +226,68 @@ Why bother? In pure expert data, $a_t$ is a function of $s_t$. A world model can
 *[In progress: results from the Explorer runs will be filled in here.]*
 
 ### 5.1 Setup and metrics
+
+Every configuration is run **three times** (seeds 0, 1, 2). Each seed has its own dataset (400 episodes), its own train/held-out split (360/40 episodes) and its own initialization. Every run trains a mini-WAM *and* a mini-VLA on the same data with the same encoders and MLP action head, for 15 epochs. I report mean ± standard deviation over the three seeds. All runs were done on single GPUs (mostly V100s) on Northeastern's Explorer cluster; one full three-seed run takes about 15 minutes.
+
+What I measure, all on held-out episodes:
+
+| metric | question it answers | reference point |
+|---|---|---|
+| **closed-loop success** | Does the policy solve the task? 100 episodes per seed, on environment seeds never seen in training. | WAM vs. VLA |
+| **imagined state error** at $k$ steps | Encode $o_t$ once, roll the dynamics forward $k$ steps with the actions that were really taken, read out the state, and compare it with the true $s_{t+k}$ (MSE in normalized units). | the **"nothing changes"** baseline $\hat s_{t+k}=s_t$ |
+| **counterfactual error** at $k$ steps | Same, but with *random* action sequences the expert never took, compared against the toy simulator's ground truth. | the **"ignore the actions"** baseline: the true future under zero actions |
+| **image error** | Pixel MSE between the decoded imagined frame and the real future frame. | copying the current frame |
+| **readout $R^2$** | How much of each state variable a *linear* map recovers from real ($k=0$) and imagined ($k>0$) latents. | 1 = perfect |
+
+The two state errors are the heart of the evaluation. The factual one asks *"can you predict what happened?"*; the counterfactual one asks *"do you know what your actions do?"*. As §5.3 shows, a model can ace the first and fail the second.
+
 ### 5.2 Does mini-WAM imagine the future?
+
+Yes, at the level of the state, and no, at the level of pixels.
+
+![Imagination quality](figures/fig-imagination-quality.svg)
+
+*Figure 2. **mini-WAM's imagined states are accurate and action-aware; its imagined pixels are not.** (a) Imagined state error with the real actions vs. the "nothing changes" baseline. (b) Counterfactual error under random action sequences vs. a model that ignores actions. (c) Pixel error of decoded imagined frames vs. copying the current frame. Mean ± std over 3 seeds (bands are narrow); 40 held-out episodes per seed.*
+
+* **States.** Fifteen steps into an open-loop imagination, the state error is $0.0071 \pm 0.0004$, about 80× lower than the "nothing changes" baseline ($0.582 \pm 0.015$). A linear readout recovers every state variable from the imagined latent with $R^2 \ge 0.977$ (mean $0.992 \pm 0.001$) at $k=15$.
+* **Actions.** Under random action sequences the expert never produced, the error after 10 steps is $0.0072 \pm 0.0005$, versus $0.388 \pm 0.001$ for a model that ignored the actions. So the world model has learned what actions *do*, not just what the expert usually did.
+* **Pixels.** The decoded imagination is *worse* than just copying the current frame at every horizon ($0.0073$ vs. $0.0050$ at $k=15$). Figure 3 shows why: the decoder draws the agent and the instructed goal, but drops the distractor goal. I come back to this in §6.
+* **The policy.** Both mini-WAM and mini-VLA succeed on 100% of test episodes in all three seeds (26.4 vs. 26.1 steps on average). This task is too easy to separate them; §5.5 makes it harder.
+
+![Imagination strip](figures/imagination-strip.png)
+
+*Figure 3. **One held-out episode, as the model sees it.** Row 1: real frames. Row 2: decoding the latent of each real frame. Row 3: decoding an open-loop imagination from $t=0$ with the real actions. The model never sees frames 1–28. Row 4: "dreaming", where the model's own policy picks the actions inside its imagination. Seed 0.*
+
 ### 5.3 Does the world model understand actions? (exploration data)
 ### 5.4 Which parts of the objective matter?
 ### 5.5 When does a world model help the policy?
 ### 5.6 Looking inside the world model
 
----
+The numbers above say the latent world model works. The figures in this section show *what it believes*. All are produced by `scripts/visualize_rollout.py` for seed 0 of the baseline.
+
+**Beliefs over time.** Figure 6 plots each state variable for one held-out episode: the truth, what the latent says *now* (read out from the encoding of each real frame), what the model *imagined* from $t=0$ with the real actions, and what it *dreamed* with its own policy. The imagined velocity follows every wiggle of the (noisy) expert for 28 steps without seeing a single new frame. The dream is smooth, because the learned policy is deterministic and has no expert noise, but it still ends up at the goal.
+
+![Beliefs](figures/beliefs.png)
+
+*Figure 6. **The imagined trajectory tracks the true one, wiggles and all.** Black: truth. Blue: linear readout of the real latent at each step. Orange dashed: open-loop imagination from $t=0$ using the real actions. Green dotted: the model's own policy acting inside its imagination. Seed 0, one held-out episode.*
+
+**What if?** Figure 7 starts from one real frame and asks the model to imagine 15 steps of a constant push in nine directions. Solid lines are the true simulator. Most imagined trajectories land close to the truth, but several (pushing right, up and down) stop short or bend. A constant push for 15 steps is much longer than any random burst in the training data (at most 3 steps), so this is a test of extrapolation, and the model is visibly less sure there. The decoded frames on the right are rougher still: the agent is often missing. The *state* of the imagination is better than its *picture*.
+
+![What if](figures/what-if.png)
+
+*Figure 7. **Counterfactual imagination: same start, nine different pushes.** Left: imagined (dashed) vs. true (solid) agent trajectories for 15 steps of constant force. Right: decoded imagined frames after 15 steps. Seed 0.*
+
+**The latent map.** Figure 8 projects held-out latents onto their top principal components. The first two components mostly encode *where the goal is* (each streak is roughly one episode), and the velocity components only appear at PC5–PC6. That is a useful reminder that PCA ranks directions by *variance*, not importance: the latent spends most of its variance on the goal location because that varies most across episodes.
+
+![Latent map](figures/latent-map.png)
+
+*Figure 8. **The latent is organized by goal location first, velocity later.** Left: PCA of held-out latents, colored by episode progress, with one real (black) and imagined (orange) trajectory. Right: correlation of each principal component with each state variable. Seed 0.*
+
+**What does the image encoder look at? Nothing, apparently.** Figure 9 draws the 16 spatial-softmax keypoints. They all sit at the image center, which means the heatmaps are nearly flat. My interpretation: the state input already tells the model where the agent and goal are, so the image encoder has no pressure to localize anything. The image-only experiment in §5.5 tests this.
+
+![Keypoints](figures/keypoints.png)
+
+*Figure 9. **With the state as input, the keypoint encoder learns nothing spatial.** The 16 keypoints collapse to the image center. Seed 0 of the baseline.*
 
 ## 6. Discussion and lessons
 
