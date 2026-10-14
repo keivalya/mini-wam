@@ -1,15 +1,27 @@
 #!/usr/bin/env bash
-# End-to-end mini-WAM experiment on the toy world:
-#   collect -> train WAM -> train VLA baseline -> evaluate -> visualize -> closed-loop test
+# End-to-end mini-WAM experiment on the toy world, repeated over several seeds:
+#   for each seed: collect -> train WAM -> train VLA baseline -> evaluate -> closed-loop test
+#   then: visualize seed 0, and summarize mean ± std over seeds
 #
 # Usage: bash scripts/run_toy.sh            (from the repo root)
-# Outputs land in data/, checkpoints/, outputs/ and videos/ inside the repo.
+# Outputs land in results/seed*/, outputs/ and videos/ inside the repo.
 set -euo pipefail
 
+# ======================= experiment configuration =======================
+# Each experiment in the study changes one of these lines (and nothing else).
+SEEDS="${SEEDS:-0 1 2}"
 EPOCHS="${EPOCHS:-15}"
-EPISODES="${EPISODES:-400}"
-SEED="${SEED:-0}"
+EPISODES="${EPISODES:-400}"              # demonstrations per seed (90% train / 10% held out)
+RANDOM_ACTION_PROB="${RANDOM_ACTION_PROB:-0.3}"   # exploration bursts in the data
+HORIZON="${HORIZON:-5}"                  # imagination steps per training window
+STATE_WEIGHT="${STATE_WEIGHT:-0.5}"
+IMAGE_WEIGHT="${IMAGE_WEIGHT:-1.0}"
+LATENT_WEIGHT="${LATENT_WEIGHT:-1.0}"
+STATE_INPUT="${STATE_INPUT:-1}"          # 0 = image + language only (no state_t input)
+ACTION_HEAD="${ACTION_HEAD:-mlp}"
+TEST_EPISODES="${TEST_EPISODES:-100}"
 DEVICE="${DEVICE:-auto}"
+# ========================================================================
 
 # ---- environment: one venv per package list, reused across runs
 #      (set MINI_WAM_PY=/path/to/python to use an existing environment instead)
@@ -59,33 +71,48 @@ else
 fi
 export PYTHONUNBUFFERED=1
 
-echo "[run] host=$(hostname) python=$($PYV --version) torch=$($PYV -c 'import torch; print(torch.__version__, "cuda" if torch.cuda.is_available() else "cpu")')"
-echo "[run] git commit: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+echo "[run] host=$(hostname) python=$($PYV --version) torch=$($PYV -c 'import torch; print(torch.__version__, torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu")')"
 echo "[run] cpus: $(nproc) slurm_job=${SLURM_JOB_ID:-none}"
-echo "[run] config: EPOCHS=$EPOCHS EPISODES=$EPISODES SEED=$SEED DEVICE=$DEVICE"
+echo "[run] config: SEEDS='$SEEDS' EPOCHS=$EPOCHS EPISODES=$EPISODES RANDOM_ACTION_PROB=$RANDOM_ACTION_PROB HORIZON=$HORIZON STATE_WEIGHT=$STATE_WEIGHT IMAGE_WEIGHT=$IMAGE_WEIGHT LATENT_WEIGHT=$LATENT_WEIGHT STATE_INPUT=$STATE_INPUT ACTION_HEAD=$ACTION_HEAD TEST_EPISODES=$TEST_EPISODES"
 
-# ---- 1. data
-$PYV -m scripts.collect_data --env toy --episodes "$EPISODES" --max-steps 80 \
-  --seed 42 --output-path data/toy.npz | tail -12
+STATE_FLAG=""
+[ "$STATE_INPUT" = "0" ] && STATE_FLAG="--no_state_input"
 
-# ---- 2. WAM and the mini-VLA baseline (same data, same action head, same seed)
-$PYV -m scripts.train --dataset-path data/toy.npz --model_type wam --action_head mlp \
-  --predict_state --predict_image --epochs "$EPOCHS" --seed "$SEED" --device "$DEVICE" \
-  --save-path checkpoints/wam.pt
+rm -rf results
+for SEED in $SEEDS; do
+  R="results/seed$SEED"
+  mkdir -p "$R"
+  echo "[run] ===== seed $SEED ====="
 
-$PYV -m scripts.train --dataset-path data/toy.npz --model_type vla --action_head mlp \
-  --epochs "$EPOCHS" --seed "$SEED" --device "$DEVICE" --save-path checkpoints/vla.pt
+  # 1. data (a different dataset per seed)
+  $PYV -m scripts.collect_data --env toy --episodes "$EPISODES" --max-steps 80 \
+    --seed $((42 + 1000 * SEED)) --random-action-prob "$RANDOM_ACTION_PROB" \
+    --output-path "$R/toy.npz" | tail -3
 
-# ---- 3. world-model evaluation on held-out episodes
-$PYV -m scripts.evaluate --checkpoint checkpoints/wam.pt --max-horizon 15
+  # 2. WAM and the mini-VLA baseline (same data, same action head, same seed)
+  $PYV -m scripts.train --dataset-path "$R/toy.npz" --model_type wam --action_head "$ACTION_HEAD" \
+    --predict_state --predict_image $STATE_FLAG --horizon "$HORIZON" \
+    --state-weight "$STATE_WEIGHT" --image-weight "$IMAGE_WEIGHT" --latent-weight "$LATENT_WEIGHT" \
+    --epochs "$EPOCHS" --seed "$SEED" --device "$DEVICE" --save-path "$R/wam.pt" | grep -E "Episodes:|Epoch $EPOCHS/| val:" | tail -3
 
-# ---- 4. look inside the world model
-$PYV -m scripts.visualize_rollout --checkpoint checkpoints/wam.pt --out-dir outputs/wam --video
+  $PYV -m scripts.train --dataset-path "$R/toy.npz" --model_type vla --action_head "$ACTION_HEAD" \
+    $STATE_FLAG --epochs "$EPOCHS" --seed "$SEED" --device "$DEVICE" --save-path "$R/vla.pt" | grep -E "Epoch $EPOCHS/| val:" | tail -2
 
-# ---- 5. closed loop on unseen seeds
-echo "[run] closed-loop WAM"
-$PYV -m scripts.test --checkpoint checkpoints/wam.pt --episodes 50 --device cpu --save-video --video-dir videos/wam | tail -1
-echo "[run] closed-loop VLA"
-$PYV -m scripts.test --checkpoint checkpoints/vla.pt --episodes 50 --device cpu | tail -1
+  # 3. world-model evaluation on held-out episodes (+ counterfactuals)
+  $PYV -m scripts.evaluate --checkpoint "$R/wam.pt" --max-horizon 15 --device "$DEVICE" --output "$R/wam_eval.json"
+
+  # 4. closed loop on unseen env seeds
+  $PYV -m scripts.test --checkpoint "$R/wam.pt" --episodes "$TEST_EPISODES" --seed $((10000 + 1000 * SEED)) \
+    --device cpu --json-out "$R/wam_test.json" | tail -1
+  $PYV -m scripts.test --checkpoint "$R/vla.pt" --episodes "$TEST_EPISODES" --seed $((10000 + 1000 * SEED)) \
+    --device cpu --json-out "$R/vla_test.json" | tail -1
+done
+
+# ---- 5. look inside the world model (first seed)
+FIRST_SEED="${SEEDS%% *}"
+$PYV -m scripts.visualize_rollout --checkpoint "results/seed$FIRST_SEED/wam.pt" --out-dir outputs/wam --video --device "$DEVICE"
+
+# ---- 6. mean ± std over seeds
+$PYV -m scripts.summarize_runs --root results
 
 echo "[run] done"
