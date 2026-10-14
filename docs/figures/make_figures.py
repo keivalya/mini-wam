@@ -162,7 +162,7 @@ def fig_exploration(exps):
         vals = [scalar(exps[n], getter) for n in names]
         return np.array([v[0] for v in vals]), np.array([v[1] for v in vals])
 
-    fig, axes = plt.subplots(1, 2, figsize=(WIDTH * 0.75, 2.0))
+    fig, axes = plt.subplots(1, 2, figsize=(WIDTH * 0.8, 2.6))
     ax = axes[0]
     for getter, color, label, marker in [
         (lambda s: s["eval"]["state_nmse"][10], ACCENT, "factual (real actions), $k$=10", "s"),
@@ -176,18 +176,18 @@ def fig_exploration(exps):
     ax.set_xticks(xs)
     ax.set_xlabel("random-action probability in the data")
     ax.set_ylabel("imagined state error (nMSE)")
-    ax.legend(loc="center right", fontsize=6)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.3))
     panel_label(ax, "a")
 
     ax = axes[1]
-    for key, color, label in [("wam_test", WAM, "mini-WAM"), ("vla_test", VLA, "mini-VLA")]:
+    for off, (key, color, label) in zip([-0.008, 0.008], [("wam_test", WAM, "mini-WAM"), ("vla_test", VLA, "mini-VLA")]):
         m, sd = series(lambda s, key=key: s[key]["success_rate"])
-        ax.errorbar(xs, 100 * m, yerr=100 * sd, color=color, marker="o", ms=3.5, capsize=2, label=label)
+        ax.errorbar(np.array(xs) + off, 100 * m, yerr=100 * sd, color=color, marker="o", ms=3.5, capsize=2, label=label)
     ax.set_xticks(xs)
     ax.set_ylim(0, 105)
     ax.set_xlabel("random-action probability in the data")
     ax.set_ylabel("closed-loop success (%)")
-    ax.legend(loc="lower left")
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.3), ncol=2)
     panel_label(ax, "b")
 
     fig.tight_layout(w_pad=1.5)
