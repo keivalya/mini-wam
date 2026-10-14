@@ -409,7 +409,7 @@ Every experiment in §5 is `scripts/run_toy.sh` with **one line** of its configu
 
 Each results folder has, per seed, `wam_eval.json` (imagination and counterfactual errors, readout $R^2$), `wam_test.json` and `vla_test.json` (closed-loop success), plus a `summary.json` with mean ± std. The figures are rebuilt from those files with `python docs/figures/make_figures.py`.
 
-On a single V100 one three-seed run takes 15–30 minutes. Most of that is the closed-loop tests and the image decoder, not the world model.
+On a single V100, one three-seed run takes about 15–30 minutes.
 
 ## References
 
