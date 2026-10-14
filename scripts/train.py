@@ -8,29 +8,39 @@ Expected dataset format: .npz with at least:
     text_ids    : (N, T_text)
     vocab       : dict
 
-For WAM next-state prediction, dataset should also include:
+For WAM training, the dataset should also include:
 
     next_states : (N, state_dim)
-
-Optional future extension:
-
     next_images : (N, H, W, 3)
+    episode_ids : (N,)    enables multi-step imagination windows (--horizon > 1)
+    is_expert   : (N,)    the policy imitates only expert actions; the world
+                          model learns from every transition
+
+scripts/collect_data.py writes all of these.
+
+Each training sample is a window of `horizon` transitions inside one episode:
+
+    o_t, a_t, a_t+1, ..., a_t+H-1, o_t+1, ..., o_t+H
+
+The WAM encodes o_t, imagines H steps with the real actions, and is scored
+against the real future observations (see models/losses.py).
 """
 
 import argparse
+import copy
+import json
 import os
-from typing import Any, Dict
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
 from models.wam_policy import MiniWAMPolicy
+from models.losses import LossWeights, compute_wam_loss
 
 
 class TrainingDataset(Dataset):
-    def __init__(self, path: str, resize_to: int = 64):
+    def __init__(self, path: str, horizon: int = 1, resize_to: int = 64):
         data = np.load(path, allow_pickle=True)
 
         self.images = data["images"]          # (N, H, W, 3)
@@ -40,9 +50,33 @@ class TrainingDataset(Dataset):
 
         self.next_states = data["next_states"] if "next_states" in data else None
         self.next_images = data["next_images"] if "next_images" in data else None
+        # 1 = expert action (imitate it), 0 = exploration action (world model only)
+        self.is_expert = data["is_expert"] if "is_expert" in data else np.ones(len(self.actions), np.float32)
+
+        n = self.images.shape[0]
+        if "episode_ids" in data:
+            self.episode_ids = data["episode_ids"]
+        else:
+            if horizon > 1:
+                raise ValueError("--horizon > 1 needs 'episode_ids' in the dataset.")
+            self.episode_ids = np.zeros(n, dtype=np.int64)
 
         self.vocab = data["vocab"].item() if data["vocab"].shape == () else data["vocab"]
+        self.state_labels = (
+            [str(s) for s in data["state_labels"]]
+            if "state_labels" in data
+            else [f"s{i}" for i in range(self.states.shape[1])]
+        )
+        self.env = str(data["env"]) if "env" in data else "unknown"
+
+        self.horizon = horizon
         self.resize_to = resize_to
+
+        # a window starting at i is valid if i ... i+H-1 are all in the same episode
+        last = np.arange(n) + horizon - 1
+        valid = last < n
+        valid[valid] &= self.episode_ids[last[valid]] == self.episode_ids[np.arange(n)[valid]]
+        self.starts = np.nonzero(valid)[0]
 
         try:
             import cv2
@@ -51,7 +85,13 @@ class TrainingDataset(Dataset):
             self.cv2 = None
 
     def __len__(self):
-        return self.images.shape[0]
+        return len(self.starts)
+
+    def subset(self, episodes):
+        """Same arrays (no copy), only windows from the given episodes."""
+        sub = copy.copy(self)
+        sub.starts = self.starts[np.isin(self.episode_ids[self.starts], episodes)]
+        return sub
 
     def _process_image(self, img):
         if self.cv2 is not None and (
@@ -59,22 +99,30 @@ class TrainingDataset(Dataset):
         ):
             img = self.cv2.resize(img, (self.resize_to, self.resize_to))
 
-        img = torch.from_numpy(img).permute(2, 0, 1).float() / 255.0
+        img = torch.from_numpy(np.ascontiguousarray(img)).permute(2, 0, 1).float() / 255.0
         return img
 
     def __getitem__(self, idx):
+        i = self.starts[idx]
+        window = slice(i, i + self.horizon)
+
         batch = {
-            "image": self._process_image(self.images[idx]),
-            "state": torch.from_numpy(self.states[idx]).float(),
-            "action": torch.from_numpy(self.actions[idx]).float(),
-            "text_ids": torch.from_numpy(self.text_ids[idx]).long(),
+            "image": self._process_image(self.images[i]),
+            "state": torch.from_numpy(self.states[i]).float(),
+            "action": torch.from_numpy(self.actions[i]).float(),
+            "is_expert": torch.tensor(float(self.is_expert[i])),
+            "text_ids": torch.from_numpy(self.text_ids[i]).long(),
+            "actions": torch.from_numpy(self.actions[window]).float(),
         }
 
+        # o_t+k is next_*[t+k-1], so the H future observations are next_*[t : t+H]
         if self.next_states is not None:
-            batch["next_state"] = torch.from_numpy(self.next_states[idx]).float()
+            batch["future_states"] = torch.from_numpy(self.next_states[window]).float()
 
         if self.next_images is not None:
-            batch["next_image"] = self._process_image(self.next_images[idx])
+            batch["future_images"] = torch.stack(
+                [self._process_image(img) for img in self.next_images[window]]
+            )
 
         return batch
 
@@ -83,8 +131,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     # Dataset / environment identity flags.
-    # These do not directly construct envs in train.py yet, but they make
-    # checkpoints and CLI usage consistent with collect_data.py / inference.py.
+    # These do not directly construct envs in train.py, but they make
+    # checkpoints and CLI usage consistent with collect_data.py / test.py.
     parser.add_argument(
         "--env",
         type=str,
@@ -112,22 +160,38 @@ def parse_args():
         choices=["mlp", "diffusion", "flow"],
     )
 
+    parser.add_argument(
+        "--image_encoder",
+        type=str,
+        default="keypoints",
+        choices=["cnn", "keypoints"],
+        help="cnn = mini-VLA TinyCNN (global pooling); keypoints = spatial-softmax CNN",
+    )
+
     parser.add_argument("--predict_state", action="store_true")
     parser.add_argument("--predict_image", action="store_true")
+    parser.add_argument(
+        "--mlp_readout",
+        action="store_true",
+        help="Use an MLP instead of a linear probe to read the state out of the latent.",
+    )
 
     parser.add_argument(
         "--device",
         type=str,
         default="auto",
-        choices=["cpu", "cuda", "auto"],
+        choices=["cpu", "cuda", "mps", "auto"],
     )
 
     # Training/data flags.
     parser.add_argument("--dataset-path", type=str, default="data/dataset.npz")
     parser.add_argument("--resize-to", type=int, default=64)
+    parser.add_argument("--horizon", type=int, default=5, help="Imagination steps per training window.")
+    parser.add_argument("--val-frac", type=float, default=0.1, help="Fraction of episodes held out.")
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--epochs", type=int, default=20)
-    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--seed", type=int, default=0)
 
     # Model flags.
     parser.add_argument("--d-model", type=int, default=128)
@@ -138,6 +202,7 @@ def parse_args():
     parser.add_argument("--action-weight", type=float, default=1.0)
     parser.add_argument("--state-weight", type=float, default=0.5)
     parser.add_argument("--image-weight", type=float, default=1.0)
+    parser.add_argument("--latent-weight", type=float, default=1.0)
 
     parser.add_argument("--save-path", type=str, default="checkpoints/model.pt")
 
@@ -153,127 +218,21 @@ def get_device(device_arg: str) -> torch.device:
             raise RuntimeError("CUDA requested, but torch.cuda.is_available() is False.")
         return torch.device("cuda")
 
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device_arg == "mps":
+        return torch.device("mps")
+
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
 
 
-def move_batch_to_device(batch: Dict[str, torch.Tensor], device: torch.device):
+def move_batch_to_device(batch, device):
     return {
         key: value.to(device) if torch.is_tensor(value) else value
         for key, value in batch.items()
     }
-
-
-def compute_total_loss(
-    outputs: Dict[str, Any],
-    batch: Dict[str, torch.Tensor],
-    args,
-):
-    """Compute VLA/WAM training loss.
-
-    VLA:
-        loss = action loss
-
-    WAM:
-        loss = action loss + optional next-state loss + optional next-image loss
-    """
-
-    logs = {}
-
-    if args.action_head == "mlp":
-        if "action" not in outputs:
-            raise KeyError("Model output must contain 'action' for action_head='mlp'.")
-
-        action_loss = F.mse_loss(outputs["action"], batch["action"])
-
-    elif args.action_head == "diffusion":
-        # Your MiniWAMPolicy should expose diffusion training loss as either:
-        # outputs["action_loss"] or outputs["loss"].
-        if "action_loss" in outputs:
-            action_loss = outputs["action_loss"]
-        elif "loss" in outputs:
-            action_loss = outputs["loss"]
-        else:
-            raise KeyError(
-                "Diffusion model output must contain 'action_loss' or 'loss'."
-            )
-
-    elif args.action_head == "flow":
-        # Future extension: your FlowMatchingHead should return a training loss.
-        if "action_loss" in outputs:
-            action_loss = outputs["action_loss"]
-        elif "flow_loss" in outputs:
-            action_loss = outputs["flow_loss"]
-        elif "loss" in outputs:
-            action_loss = outputs["loss"]
-        else:
-            raise KeyError(
-                "Flow model output must contain 'action_loss', 'flow_loss', or 'loss'."
-            )
-
-    else:
-        raise ValueError(f"Unknown action_head: {args.action_head}")
-
-    logs["action_loss"] = action_loss.detach()
-    total_loss = args.action_weight * action_loss
-
-    if args.model_type == "wam" and args.predict_state:
-        if "next_state" not in batch:
-            raise KeyError(
-                "You passed --predict_state, but dataset has no 'next_states' array. "
-                "Update collect_data.py to save next_states."
-            )
-
-        if "next_state" not in outputs:
-            raise KeyError(
-                "You passed --predict_state, but model output has no 'next_state'."
-            )
-
-        state_loss = F.mse_loss(outputs["next_state"], batch["next_state"])
-        logs["state_loss"] = state_loss.detach()
-        total_loss = total_loss + args.state_weight * state_loss
-
-    if args.model_type == "wam" and args.predict_image:
-        if "next_image" not in batch:
-            raise KeyError(
-                "You passed --predict_image, but dataset has no 'next_images' array."
-            )
-
-        if "next_image" not in outputs:
-            raise KeyError(
-                "You passed --predict_image, but model output has no 'next_image'."
-            )
-
-        image_loss = F.mse_loss(outputs["next_image"], batch["next_image"])
-        logs["image_loss"] = image_loss.detach()
-        total_loss = total_loss + args.image_weight * image_loss
-
-    logs["total_loss"] = total_loss.detach()
-
-    return total_loss, logs
-
-
-def forward_model(model, batch, args):
-    """Call model in a batch-driven way.
-
-    This keeps the train loop conceptually clean:
-
-        outputs = forward_model(model, batch, args)
-        loss, logs = compute_total_loss(outputs, batch, args)
-
-    If you later update MiniWAMPolicy.forward(batch), you can replace this helper
-    with simply:
-
-        outputs = model(batch)
-    """
-
-    # Current MiniWAMPolicy signature:
-    #   model(image, text_tokens, state, actions=None)
-    return model(
-        image=batch["image"],
-        text_tokens=batch["text_ids"],
-        state=batch["state"],
-        actions=batch["action"],
-    )
 
 
 def validate_args_and_dataset(args, dataset):
@@ -285,120 +244,164 @@ def validate_args_and_dataset(args, dataset):
 
         args.predict_state = False
         args.predict_image = False
+        return
 
-    if args.model_type == "wam" and args.predict_state and dataset.next_states is None:
+    if dataset.next_states is None or dataset.next_images is None:
         raise ValueError(
-            "WAM next-state training requires 'next_states' in the dataset. "
-            "Update scripts/collect_data.py to save next_states."
+            "WAM training requires 'next_states' and 'next_images' in the dataset "
+            "(the latent dynamics is trained against encoded future observations). "
+            "Re-collect with scripts/collect_data.py."
         )
 
-    if args.model_type == "wam" and args.predict_image and dataset.next_images is None:
-        raise ValueError(
-            "WAM next-image training requires 'next_images' in the dataset. "
-            "For v0.1, run without --predict_image."
+    if not (args.predict_state or args.predict_image):
+        print(
+            "[warning] WAM with neither --predict_state nor --predict_image: the latent "
+            "dynamics is only anchored by the action loss and may collapse."
         )
+
+
+def split_episodes(episode_ids, val_frac, seed):
+    episodes = np.unique(episode_ids)
+    rng = np.random.default_rng(seed)
+    rng.shuffle(episodes)
+    n_val = int(round(val_frac * len(episodes)))
+    if val_frac > 0 and len(episodes) > 1:
+        n_val = max(n_val, 1)
+    return np.sort(episodes[n_val:]), np.sort(episodes[:n_val])
+
+
+def run_epoch(model, loader, weights, device, optimizer=None):
+    training = optimizer is not None
+    model.train(training)
+
+    totals, num_samples = {}, 0
+
+    for batch in loader:
+        batch = move_batch_to_device(batch, device)
+        batch_size = batch["image"].size(0)
+
+        with torch.set_grad_enabled(training):
+            outputs = model(batch)
+            loss, logs = compute_wam_loss(outputs, batch, model, weights)
+
+        if training:
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        num_samples += batch_size
+        for key, value in logs.items():
+            totals[key] = totals.get(key, 0.0) + value.item() * batch_size
+
+    return {key: value / max(num_samples, 1) for key, value in totals.items()}
+
+
+def format_logs(logs):
+    short = {
+        "total_loss": "loss",
+        "action_loss": "action",
+        "state_recon_loss": "s_rec",
+        "state_pred_loss": "s_pred",
+        "image_recon_loss": "img_rec",
+        "image_pred_loss": "img_pred",
+        "latent_loss": "latent",
+    }
+    return " ".join(f"{short[k]}={logs[k]:.4f}" for k in short if k in logs)
 
 
 def main():
     args = parse_args()
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
 
-    os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
+    os.makedirs(os.path.dirname(args.save_path) or ".", exist_ok=True)
 
     device = get_device(args.device)
     print(f"Using device: {device}")
 
-    dataset = TrainingDataset(args.dataset_path, resize_to=args.resize_to)
-    validate_args_and_dataset(args, dataset)
+    horizon = args.horizon if args.model_type == "wam" else 1
 
-    vocab_size = max(dataset.vocab.values()) + 1
-    state_dim = dataset.states.shape[1]
-    action_dim = dataset.actions.shape[1]
+    full = TrainingDataset(args.dataset_path, horizon=horizon, resize_to=args.resize_to)
+    validate_args_and_dataset(args, full)
+
+    train_eps, val_eps = split_episodes(full.episode_ids, args.val_frac, args.seed)
+    train_set = full.subset(train_eps)
+    val_set = full.subset(val_eps)
+    print(
+        f"Episodes: {len(train_eps)} train / {len(val_eps)} val | "
+        f"windows: {len(train_set)} train / {len(val_set)} val | horizon={horizon}"
+    )
+
+    vocab_size = max(full.vocab.values()) + 1
+    state_dim = full.states.shape[1]
+    action_dim = full.actions.shape[1]
 
     model = MiniWAMPolicy(
         vocab_size=vocab_size,
         state_dim=state_dim,
         action_dim=action_dim,
         d_model=args.d_model,
-        diffusion_T=args.diffusion_T,
         action_head=args.action_head,
-        predict_state=(args.model_type == "wam" and args.predict_state),
+        image_encoder=args.image_encoder,
+        image_size=args.resize_to,
+        model_type=args.model_type,
+        predict_state=args.predict_state,
+        predict_image=args.predict_image,
+        linear_readout=not args.mlp_readout,
+        diffusion_T=args.diffusion_T,
         flow_steps=args.flow_steps,
     ).to(device)
 
-    loader = DataLoader(
-        dataset,
-        batch_size=args.batch_size,
-        shuffle=True,
+    train_states = full.states[np.isin(full.episode_ids, train_eps)]
+    model.set_state_stats(train_states.mean(axis=0), train_states.std(axis=0))
+
+    train_idx = np.nonzero(np.isin(full.episode_ids, train_eps))[0]
+    sample = train_idx[:: max(1, len(train_idx) // 2000)]
+    model.set_image_mean(torch.stack([full._process_image(full.images[i]) for i in sample]).mean(dim=0))
+
+    weights = LossWeights(
+        action=args.action_weight,
+        state=args.state_weight,
+        image=args.image_weight,
+        latent=args.latent_weight,
     )
+
+    train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(val_set, batch_size=args.batch_size, shuffle=False)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
+    history = []
     for epoch in range(args.epochs):
-        model.train()
+        train_logs = run_epoch(model, train_loader, weights, device, optimizer)
+        val_logs = run_epoch(model, val_loader, weights, device) if len(val_set) else {}
 
-        running_logs = {
-            "total_loss": 0.0,
-            "action_loss": 0.0,
-            "state_loss": 0.0,
-            "image_loss": 0.0,
-        }
-
-        num_samples = 0
-
-        for batch in loader:
-            batch = move_batch_to_device(batch, device)
-            batch_size = batch["image"].size(0)
-
-            outputs = forward_model(model, batch, args)
-
-            loss, logs = compute_total_loss(
-                outputs=outputs,
-                batch=batch,
-                args=args,
-            )
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            num_samples += batch_size
-
-            for key in running_logs:
-                if key in logs:
-                    running_logs[key] += logs[key].item() * batch_size
-
-        avg_total = running_logs["total_loss"] / num_samples
-        avg_action = running_logs["action_loss"] / num_samples
-        avg_state = running_logs["state_loss"] / num_samples
-        avg_image = running_logs["image_loss"] / num_samples
-
-        print(
-            f"Epoch {epoch + 1}/{args.epochs} "
-            f"loss={avg_total:.4f} "
-            f"action={avg_action:.4f} "
-            f"state={avg_state:.4f} "
-            f"image={avg_image:.4f}"
-        )
+        history.append({"epoch": epoch + 1, "train": train_logs, "val": val_logs})
+        print(f"Epoch {epoch + 1}/{args.epochs} train: {format_logs(train_logs)}")
+        if val_logs:
+            print(f"{'':>{len(str(args.epochs)) * 2 + 7}} val:   {format_logs(val_logs)}")
 
     torch.save(
         {
             "model_state_dict": model.state_dict(),
-            "vocab": dataset.vocab,
-            "state_dim": state_dim,
-            "action_dim": action_dim,
-            "d_model": args.d_model,
-            "diffusion_T": args.diffusion_T,
-            "flow_steps": args.flow_steps,
-            "model_type": args.model_type,
-            "action_head": args.action_head,
-            "predict_state": args.predict_state,
-            "predict_image": args.predict_image,
-            "env": args.env,
+            "model_config": model.config,
+            "vocab": full.vocab,
+            "state_labels": full.state_labels,
+            "train_episodes": train_eps.tolist(),
+            "val_episodes": val_eps.tolist(),
+            "horizon": horizon,
+            "env": full.env if full.env != "unknown" else args.env,
             "task": args.task,
             "resize_to": args.resize_to,
+            "dataset_path": args.dataset_path,
+            "args": vars(args),
+            "history": history,
         },
         args.save_path,
     )
+
+    with open(os.path.splitext(args.save_path)[0] + "_history.json", "w") as f:
+        json.dump(history, f, indent=2)
 
     print("Saved checkpoint:", args.save_path)
 

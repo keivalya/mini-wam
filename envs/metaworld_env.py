@@ -2,6 +2,16 @@ import gymnasium as gym
 import numpy as np
 import metaworld
 
+
+# Meta-World v3 observations are 39-dim:
+#   current frame (18) + previous frame (18) + goal (3)
+_FRAME = (
+    ["hand_x", "hand_y", "hand_z", "gripper"]
+    + ["obj_x", "obj_y", "obj_z", "obj_qw", "obj_qx", "obj_qy", "obj_qz"]
+    + ["obj2_x", "obj2_y", "obj2_z", "obj2_qw", "obj2_qx", "obj2_qy", "obj2_qz"]
+)
+METAWORLD_STATE_LABELS = _FRAME + ["prev_" + n for n in _FRAME] + ["goal_x", "goal_y", "goal_z"]
+
 class MetaWorldMT1Wrapper:
     """
     Wraps a Metaworld MT1 environment into a simple interface:

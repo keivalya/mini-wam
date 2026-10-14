@@ -4,3 +4,4 @@ MUJOCO_LOG.txt
 LIBERO/
 videos*/
 checkpoints/
+outputs/
