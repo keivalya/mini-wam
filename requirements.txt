@@ -12,6 +12,7 @@ metaworld
 opencv-python
 
 # misc
+matplotlib
 tqdm
 
 # video deps
