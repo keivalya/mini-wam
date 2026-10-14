@@ -22,7 +22,7 @@ fi
 
 # CPU-only torch wheels unless this machine has an NVIDIA GPU (much smaller install)
 if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
-  TORCH_INDEX="https://download.pytorch.org/whl/cu124"
+  TORCH_INDEX="https://download.pytorch.org/whl/cu126"
 else
   TORCH_INDEX="https://download.pytorch.org/whl/cpu"
 fi
