@@ -12,7 +12,7 @@ Vision-Language-Action models (VLAs) map an image, an instruction and the robot 
 
 In this paper I build the smallest WAM I could make that still behaves like one, called **mini-WAM**. It starts from mini-VLA and adds three things: an action-conditioned latent dynamics model, a *linear* readout that turns any latent back into a physical state, and an image decoder that turns it back into a picture. Everything (the policy, the dynamics and the readouts) runs on one shared latent vector, so the model can "imagine" many steps ahead and we can *look at* what it imagines.
 
-I train mini-WAM on a toy 2D world that runs on a laptop, and study it the way you would study a real model: three seeds per experiment, held-out episodes, and a counterfactual test against the true simulator. *[Results summary goes here once the runs finish.]*
+I train mini-WAM on a toy 2D world that runs on a laptop, and study it the way you would study a real model: three seeds per experiment, held-out episodes, and a counterfactual test against the true simulator. Four findings stand out. (1) The latent world model imagines 15 steps ahead with about 80× less state error than assuming nothing changes, and every imagined latent is linearly readable. (2) Trained on expert demonstrations alone, it predicts what happened *better* but understands other actions 15× *worse*; a few random-action bursts in the data fix this. (3) The training horizon trades short-range for long-range accuracy, while the latent-consistency and pixel losses matter little here. (4) The world-model objective does not help the policy when the state is given, but when the model must work from pixels alone it more than doubles closed-loop success (80% vs. 36%). The probe shows why: imagination recovers the velocity a single frame cannot show.
 
 All of mini-WAM is about 1,000 lines of PyTorch. The point is not state-of-the-art numbers. The point is that you can read every line, change one thing, and see what the world model learned.
 
@@ -113,6 +113,8 @@ flowchart LR
     Z1 --> D2[ImageDecoder] --> I1[î_t+1]
     Z1 --> P2[ActionHead] --> A1[â_t+1 …]
 ```
+
+*Figure 1. **mini-WAM: everything on one latent.** The observation encoder (from mini-VLA) produces $z_t$. The policy, the state readout and the image decoder read from $z_t$; the latent dynamics moves it forward given an action. Applying the dynamics repeatedly gives imagined latents, which are read out with the same readout and decoder.*
 
 The whole design rests on one idea: **everything lives on the same latent $z$.** The policy acts from $z$, the dynamics moves $z$ forward given an action, and the readouts turn *any* $z$, encoded from a real frame or imagined, back into a state and an image. Because the policy also reads $z$, the model can roll its own policy forward without ever touching the environment (the "dream" row in Figure 3).
 
@@ -300,7 +302,7 @@ Up to now the policy never benefited: mini-VLA was already at 100%. I tried two 
 
 *Figure 10. **The world-model objective hurts with very few demos, and helps a lot when the state must be inferred from pixels.** (a) Closed-loop success vs. number of demonstration episodes (15 epochs each). Open markers: the same 25 episodes trained ~15× longer, to match the baseline's number of gradient steps. (b) Success with and without the state input (400 episodes). Mean ± std over 3 seeds; 100 test episodes per seed.*
 
-**Few demonstrations: the WAM is *worse*.** With 25 episodes per seed, mini-WAM succeeds $87.0 \pm 7.8\%$ of the time vs. $99.7 \pm 0.5\%$ for mini-VLA. With 50 episodes the gap shrinks ($96.7 \pm 2.6\%$ vs. $99.7 \pm 0.5\%$), and with 100 it is gone ($100\%$ vs. $99.7 \pm 0.5\%$). One confound is training length. All runs use 15 epochs, so 25 episodes means about 1/16 of the baseline's gradient steps, and the WAM has more to learn in those steps. *[Matched-steps result goes here.]*
+**Few demonstrations: the WAM is *worse*.** With 25 episodes per seed, mini-WAM succeeds $87.0 \pm 7.8\%$ of the time vs. $99.7 \pm 0.5\%$ for mini-VLA. With 50 episodes the gap shrinks ($96.7 \pm 2.6\%$ vs. $99.7 \pm 0.5\%$), and with 100 it is gone ($100\%$ vs. $99.7 \pm 0.5\%$). One confound is training length. All runs use 15 epochs, so 25 episodes means about 1/16 of the baseline's gradient steps, and the WAM has more to learn in those steps. To check, I trained the same 25-episode datasets for 225 epochs, roughly the baseline's number of gradient steps. The gap mostly closes: $96.3 \pm 1.2\%$ for mini-WAM vs. $98.7 \pm 1.9\%$ for mini-VLA. So most of the low-data penalty was *undertraining*: the WAM has four losses to fit and needs more steps to get its policy right. What remains is small, and within about one standard deviation. Training longer does expose a new problem, though. The world model overfits 22 training episodes badly (image loss 0.0005 on training data vs. 0.016 on held-out episodes; imagined-state $R^2$ at $k=15$ only $0.72 \pm 0.17$). A world model needs far more data than a policy to be good.
 
 **No state input: the WAM is much *better*.** When both models see only the image and the instruction, mini-WAM succeeds $80.3 \pm 12.0\%$ of the time and mini-VLA only $36.0 \pm 19.8\%$ (mean episode length 32.5 vs. 60.1 steps). The spread across seeds is large, but the WAM is ahead in every seed (WAM/VLA success: 97/23, 69/64 and 75/21%).
 
@@ -366,7 +368,7 @@ Here is what I would tell someone moving from VLAs to WAMs, based on what this s
 
 **5. Pixels are an expensive and misleading target.** mini-WAM's decoded imagination was worse than copying the frame, mostly because it drops the distractor goal, an object that is irrelevant to the instructed task. Meanwhile the *state* of the imagination was excellent. Large WAMs face the same tension at scale. Chen et al.'s MiniWAM, for example, predicts compact learned future representations instead of native visual features and reports that this is both cheaper and better for policy learning ([MiniWAM](https://www.alphaxiv.org/abs/2610.12194)). The survey puts the general point well: "This separation can create a mismatch between predictive fidelity and control utility: visually plausible futures are not necessarily actionable, and accurate short-horizon prediction does not guarantee robust long-horizon behavior" ([Survey](https://www.alphaxiv.org/abs/2609.16074)).
 
-**6. A world-model objective does not automatically make a better policy.** *[Low-data and image-only conclusions go here.]*
+**6. A world-model objective does not automatically make a better policy, but it helps when the policy has to infer something.** When the state was given, the WAM's policy was never better than the VLA's. With very few demos it was worse, mostly because it needed more training steps (§5.5). When the state had to be inferred from pixels, the WAM more than doubled the success rate ($80\%$ vs. $36\%$), and the probe shows why: learning to predict the future forces the latent to model motion, which a single frame does not show. My takeaway is that world modeling pays off when there is *hidden state* the future depends on. That describes most real robot problems (occlusion, contact forces, object properties), and it describes very little of a fully observed toy world.
 
 ### Limitations
 
@@ -382,7 +384,11 @@ Here is what I would tell someone moving from VLAs to WAMs, based on what this s
 3. **Meta-World.** `collect_data.py` and `test.py` already support it.
 
 
-## 7. Reproducing everything
+## 7. Conclusion
+
+A World Action Model is not a mysterious new kind of network. It is a VLA plus a learned simulator that shares the VLA's latent space. mini-WAM builds one in about 1,000 lines. The simulator works: it imagines accurately, it can be read linearly, and it responds to actions, *if* the data contains actions worth responding to. The study also shows the two places where WAMs differ most from VLAs in practice. They need different data (diverse actions, not just expert ones), and they pay off most when something about the world is hidden from a single observation. Both lessons were cheap to find at this scale, and I expect both to matter at every scale.
+
+## 8. Reproducing everything
 
 ```sh
 pip install -r requirements.txt
