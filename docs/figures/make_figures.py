@@ -251,6 +251,12 @@ def fig_data_and_state(exps):
         vals = [scalar(exps[name], lambda s, key=key: 100 * s[key]["success_rate"]) for _, name in pts]
         ax.errorbar(xs, [v[0] for v in vals], yerr=[v[1] for v in vals], color=color, marker="o", ms=3.5,
                     capsize=2, label=label)
+    if exps.get("episodes-25-matched"):
+        # same 25 episodes, trained ~15x longer to match the baseline's gradient steps
+        for off, (key, color) in zip([0.94, 1.06], [("wam_test", WAM), ("vla_test", VLA)]):
+            v = scalar(exps["episodes-25-matched"], lambda s, key=key: 100 * s[key]["success_rate"])
+            ax.errorbar(25 * off, v[0], yerr=v[1], color=color, marker="o", mfc="white", ms=4, capsize=2, ls="none")
+        ax.plot([], [], color="black", marker="o", mfc="white", ls="none", label="25 episodes, matched steps")
     ax.set_xscale("log")
     ax.set_xticks(xs)
     ax.set_xticklabels([str(x) for x in xs])
