@@ -27,29 +27,36 @@ against the real future observations (see models/losses.py).
 """
 
 import argparse
-import copy
 import json
 import os
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader
 
 from models.wam_policy import MiniWAMPolicy
 from models.losses import LossWeights, compute_wam_loss
 
 
-class TrainingDataset(Dataset):
+class TrainingDataset:
+    """
+    The whole dataset lives in memory (on the GPU if there is one).
+
+    The toy dataset is ~15k transitions of 64x64 images (~400 MB as uint8),
+    so instead of a DataLoader we keep every array as a tensor on the device
+    and build each batch with plain tensor indexing. That avoids a per-sample
+    DataLoader, which is the bottleneck on a cluster node with one CPU core.
+    """
+
     def __init__(self, path: str, horizon: int = 1, resize_to: int = 64):
         data = np.load(path, allow_pickle=True)
 
-        self.images = data["images"]          # (N, H, W, 3)
+        self.images = self._resize(data["images"], resize_to)   # (N, H, W, 3) uint8
         self.states = data["states"]          # (N, state_dim)
         self.actions = data["actions"]        # (N, action_dim)
         self.text_ids = data["text_ids"]      # (N, T_text)
 
         self.next_states = data["next_states"] if "next_states" in data else None
-        self.next_images = data["next_images"] if "next_images" in data else None
+        self.next_images = self._resize(data["next_images"], resize_to) if "next_images" in data else None
         # 1 = expert action (imitate it), 0 = exploration action (world model only)
         self.is_expert = data["is_expert"] if "is_expert" in data else np.ones(len(self.actions), np.float32)
 
@@ -70,7 +77,6 @@ class TrainingDataset(Dataset):
         self.env = str(data["env"]) if "env" in data else "unknown"
 
         self.horizon = horizon
-        self.resize_to = resize_to
 
         # a window starting at i is valid if i ... i+H-1 are all in the same episode
         last = np.arange(n) + horizon - 1
@@ -78,53 +84,57 @@ class TrainingDataset(Dataset):
         valid[valid] &= self.episode_ids[last[valid]] == self.episode_ids[np.arange(n)[valid]]
         self.starts = np.nonzero(valid)[0]
 
-        try:
-            import cv2
-            self.cv2 = cv2
-        except ImportError:
-            self.cv2 = None
+    @staticmethod
+    def _resize(images, size):
+        if images.shape[1] == size and images.shape[2] == size:
+            return images
+        import cv2
+        return np.stack([cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA) for img in images])
 
-    def __len__(self):
-        return len(self.starts)
+    def starts_in(self, episodes):
+        """Window start indices whose episode is in `episodes`."""
+        return self.starts[np.isin(self.episode_ids[self.starts], episodes)]
 
-    def subset(self, episodes):
-        """Same arrays (no copy), only windows from the given episodes."""
-        sub = copy.copy(self)
-        sub.starts = self.starts[np.isin(self.episode_ids[self.starts], episodes)]
-        return sub
-
-    def _process_image(self, img):
-        if self.cv2 is not None and (
-            img.shape[0] != self.resize_to or img.shape[1] != self.resize_to
-        ):
-            img = self.cv2.resize(img, (self.resize_to, self.resize_to))
-
-        img = torch.from_numpy(np.ascontiguousarray(img)).permute(2, 0, 1).float() / 255.0
-        return img
-
-    def __getitem__(self, idx):
-        i = self.starts[idx]
-        window = slice(i, i + self.horizon)
-
-        batch = {
-            "image": self._process_image(self.images[i]),
-            "state": torch.from_numpy(self.states[i]).float(),
-            "action": torch.from_numpy(self.actions[i]).float(),
-            "is_expert": torch.tensor(float(self.is_expert[i])),
-            "text_ids": torch.from_numpy(self.text_ids[i]).long(),
-            "actions": torch.from_numpy(self.actions[window]).float(),
-        }
-
-        # o_t+k is next_*[t+k-1], so the H future observations are next_*[t : t+H]
+    def to(self, device):
+        """Move every array to `device` once, as tensors."""
+        t = lambda x: torch.from_numpy(np.ascontiguousarray(x)).to(device)
+        self.device = device
+        self.t_images = t(self.images).permute(0, 3, 1, 2).contiguous()     # uint8 (N, 3, H, W)
+        self.t_states = t(self.states).float()
+        self.t_actions = t(self.actions).float()
+        self.t_text_ids = t(self.text_ids).long()
+        self.t_is_expert = t(self.is_expert).float()
         if self.next_states is not None:
-            batch["future_states"] = torch.from_numpy(self.next_states[window]).float()
-
+            self.t_next_states = t(self.next_states).float()
         if self.next_images is not None:
-            batch["future_images"] = torch.stack(
-                [self._process_image(img) for img in self.next_images[window]]
-            )
+            self.t_next_images = t(self.next_images).permute(0, 3, 1, 2).contiguous()
+        return self
 
-        return batch
+    def batches(self, starts, batch_size, shuffle):
+        """Yield batches of windows starting at `starts` (see the module docstring)."""
+        starts = torch.as_tensor(starts, device=self.device)
+        if shuffle:
+            starts = starts[torch.randperm(len(starts), device=self.device)]
+        offsets = torch.arange(self.horizon, device=self.device)
+
+        for k in range(0, len(starts), batch_size):
+            i = starts[k : k + batch_size]          # (B,)
+            window = i[:, None] + offsets           # (B, H)
+
+            batch = {
+                "image": self.t_images[i].float() / 255.0,
+                "state": self.t_states[i],
+                "action": self.t_actions[i],
+                "is_expert": self.t_is_expert[i],
+                "text_ids": self.t_text_ids[i],
+                "actions": self.t_actions[window],
+            }
+            # o_t+k is next_*[t+k-1], so the H future observations are next_*[t : t+H]
+            if self.next_states is not None:
+                batch["future_states"] = self.t_next_states[window]
+            if self.next_images is not None:
+                batch["future_images"] = self.t_next_images[window].float() / 255.0
+            yield batch
 
 
 def parse_args():
@@ -170,6 +180,11 @@ def parse_args():
 
     parser.add_argument("--predict_state", action="store_true")
     parser.add_argument("--predict_image", action="store_true")
+    parser.add_argument(
+        "--no_state_input",
+        action="store_true",
+        help="Image + language only: the model never sees state_t (it still predicts it).",
+    )
     parser.add_argument(
         "--mlp_readout",
         action="store_true",
@@ -228,13 +243,6 @@ def get_device(device_arg: str) -> torch.device:
     return torch.device("cpu")
 
 
-def move_batch_to_device(batch, device):
-    return {
-        key: value.to(device) if torch.is_tensor(value) else value
-        for key, value in batch.items()
-    }
-
-
 def validate_args_and_dataset(args, dataset):
     if args.model_type == "vla":
         if args.predict_state:
@@ -270,14 +278,13 @@ def split_episodes(episode_ids, val_frac, seed):
     return np.sort(episodes[n_val:]), np.sort(episodes[:n_val])
 
 
-def run_epoch(model, loader, weights, device, optimizer=None):
+def run_epoch(model, batches, weights, optimizer=None):
     training = optimizer is not None
     model.train(training)
 
     totals, num_samples = {}, 0
 
-    for batch in loader:
-        batch = move_batch_to_device(batch, device)
+    for batch in batches:
         batch_size = batch["image"].size(0)
 
         with torch.set_grad_enabled(training):
@@ -349,12 +356,13 @@ def main():
     validate_args_and_dataset(args, full)
 
     train_eps, val_eps = split_episodes(full.episode_ids, args.val_frac, args.seed)
-    train_set = full.subset(train_eps)
-    val_set = full.subset(val_eps)
+    train_starts = full.starts_in(train_eps)
+    val_starts = full.starts_in(val_eps)
     print(
         f"Episodes: {len(train_eps)} train / {len(val_eps)} val | "
-        f"windows: {len(train_set)} train / {len(val_set)} val | horizon={horizon}"
+        f"windows: {len(train_starts)} train / {len(val_starts)} val | horizon={horizon}"
     )
+    full.to(device)
 
     vocab_size = max(full.vocab.values()) + 1
     state_dim = full.states.shape[1]
@@ -372,6 +380,7 @@ def main():
         predict_state=args.predict_state,
         predict_image=args.predict_image,
         linear_readout=not args.mlp_readout,
+        use_state_input=not args.no_state_input,
         diffusion_T=args.diffusion_T,
         flow_steps=args.flow_steps,
     ).to(device)
@@ -381,7 +390,7 @@ def main():
 
     train_idx = np.nonzero(np.isin(full.episode_ids, train_eps))[0]
     sample = train_idx[:: max(1, len(train_idx) // 2000)]
-    model.set_image_mean(torch.stack([full._process_image(full.images[i]) for i in sample]).mean(dim=0))
+    model.set_image_mean(full.t_images[torch.as_tensor(sample, device=device)].float().mean(dim=0) / 255.0)
 
     weights = LossWeights(
         action=args.action_weight,
@@ -390,15 +399,12 @@ def main():
         latent=args.latent_weight,
     )
 
-    train_loader = DataLoader(train_set, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_set, batch_size=args.batch_size, shuffle=False)
-
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     history = []
     for epoch in range(args.epochs):
-        train_logs = run_epoch(model, train_loader, weights, device, optimizer)
-        val_logs = run_epoch(model, val_loader, weights, device) if len(val_set) else {}
+        train_logs = run_epoch(model, full.batches(train_starts, args.batch_size, shuffle=True), weights, optimizer)
+        val_logs = run_epoch(model, full.batches(val_starts, args.batch_size, shuffle=False), weights) if len(val_starts) else {}
 
         history.append({"epoch": epoch + 1, "train": train_logs, "val": val_logs})
         print(f"Epoch {epoch + 1}/{args.epochs} train: {format_logs(train_logs)}")
