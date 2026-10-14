@@ -2,7 +2,7 @@
 
 **Keivalya Pandya**, Northeastern University
 
-*A tutorial written as a research paper. Code: this repository. Companion to [mini-VLA](https://github.com/keivalya/mini-vla).*
+*A tutorial written as a research paper. Code: this repository.*
 
 ---
 
@@ -10,7 +10,7 @@
 
 Vision-Language-Action models (VLAs) map an image, an instruction and the robot state to an action. They learn *what to do*, but nothing in their training asks them *what will happen* when they do it. World Action Models (WAMs) add that second question: the same network that picks the action must also predict the next state of the world.
 
-In this paper I build the smallest WAM I could make that still behaves like one, called **mini-WAM**. It starts from mini-VLA and adds three things: an action-conditioned latent dynamics model, a *linear* readout that turns any latent back into a physical state, and an image decoder that turns it back into a picture. Everything (the policy, the dynamics and the readouts) runs on one shared latent vector, so the model can "imagine" many steps ahead and we can *look at* what it imagines.
+In this paper I build the smallest WAM I could make that still behaves like one, called **mini-WAM**. It starts from a small VLA (image, language and state encoders with an action head) and adds three things: an action-conditioned latent dynamics model, a *linear* readout that turns any latent back into a physical state, and an image decoder that turns it back into a picture. Everything (the policy, the dynamics and the readouts) runs on one shared latent vector, so the model can "imagine" many steps ahead and we can *look at* what it imagines.
 
 I train mini-WAM on a toy 2D world that runs on a laptop, and study it the way you would study a real model: three seeds per experiment, held-out episodes, and a counterfactual test against the true simulator. Four findings stand out. (1) The latent world model imagines 15 steps ahead with about 80× less state error than assuming nothing changes, and every imagined latent is linearly readable. (2) Trained on expert demonstrations alone, it predicts what happened *better* but understands other actions 15× *worse*; a few random-action bursts in the data fix this. (3) The training horizon trades short-range for long-range accuracy, while the latent-consistency and pixel losses matter little here. (4) The world-model objective does not help the policy when the state is given, but when the model must work from pixels alone it more than doubles closed-loop success (80% vs. 36%). The probe shows why: imagination recovers the velocity a single frame cannot show.
 
@@ -20,10 +20,10 @@ All of mini-WAM is about 1,000 lines of PyTorch. The point is not state-of-the-a
 
 ## 1. Introduction
 
-If you have trained a VLA, or just read mini-VLA, you know the recipe: encode the image, encode the instruction, encode the robot state, fuse them, and regress (or diffuse) an action.
+If you have trained a VLA, you know the recipe: encode the image, encode the instruction, encode the robot state, fuse them, and regress (or diffuse) an action.
 
 ```text
-mini-VLA:   image_t + language + state_t → action_t
+VLA:        image_t + language + state_t → action_t
 ```
 
 That recipe works surprisingly well, but it is *reactive*. A recent survey of World Action Models puts it like this:
@@ -40,7 +40,7 @@ The same survey defines WAMs as "predictive control models that connect future-s
 
 This paper is my attempt to answer those questions at a scale where you can watch everything happen. My contributions are:
 
-1. **A minimal WAM** (§3). mini-VLA plus three small modules: latent dynamics, a linear state readout and an image decoder, all on one shared latent. Each new module is under 100 lines.
+1. **A minimal WAM** (§3). A small VLA plus three small modules: latent dynamics, a linear state readout and an image decoder, all on one shared latent. Each new module is under 100 lines.
 2. **A toy world built for understanding** (§4). A 2D point mass with momentum and two language-selected goals. It steps and renders in a fraction of a millisecond, and its true state is six numbers, so we can check exactly what the latent encodes.
 3. **Tools for looking inside** (§5.5): imagination strips, belief traces, a latent map, "what if" counterfactuals and an error-vs-horizon curve.
 4. **A small but careful study** (§5). Three seeds per configuration, held-out episodes, and ablations of the data, the loss terms and the imagination horizon. It also includes the experiment that made me rethink the data: a world model trained only on expert demos *learns to ignore the action*.
@@ -75,7 +75,7 @@ The idea of learning a model of the world and acting inside it is old in control
 
 ### 2.3 VLAs
 
-VLAs such as RT-2 ([Brohan et al.](https://doi.org/10.48550/arxiv.2307.15818)), OpenVLA ([Kim et al.](https://www.alphaxiv.org/abs/2406.09246)) and π0 ([Black et al.](https://doi.org/10.15607/rss.2025.xxi.010)) scale the "observation + instruction → action" recipe with large pretrained backbones and large robot datasets. Their action heads (discrete tokens, diffusion ([Chi et al.](https://doi.org/10.15607/rss.2023.xix.026)), flow matching ([Lipman et al.](https://doi.org/10.48550/arxiv.2210.02747))) carry over unchanged to WAMs. mini-VLA and mini-WAM implement all three of MLP, diffusion and flow.
+VLAs such as RT-2 ([Brohan et al.](https://doi.org/10.48550/arxiv.2307.15818)), OpenVLA ([Kim et al.](https://www.alphaxiv.org/abs/2406.09246)) and π0 ([Black et al.](https://doi.org/10.15607/rss.2025.xxi.010)) scale the "observation + instruction → action" recipe with large pretrained backbones and large robot datasets. Their action heads (discrete tokens, diffusion ([Chi et al.](https://doi.org/10.15607/rss.2023.xix.026)), flow matching ([Lipman et al.](https://doi.org/10.48550/arxiv.2210.02747))) carry over unchanged to WAMs; mini-WAM implements MLP, diffusion and flow heads.
 
 Interestingly, there is evidence that large VLAs may *already* contain some implicit model of state transitions: Molinari et al. probe OpenVLA's internal activations for future state changes ([Emergent World Representations in OpenVLA](https://www.alphaxiv.org/abs/2509.24559)). A WAM makes that model *explicit*, so it can be trained, tested and used directly.
 
@@ -114,23 +114,23 @@ flowchart LR
     Z1 --> P2[ActionHead] --> A1[â_t+1 …]
 ```
 
-*Figure 1. **mini-WAM: everything on one latent.** The observation encoder (from mini-VLA) produces $z_t$. The policy, the state readout and the image decoder read from $z_t$; the latent dynamics moves it forward given an action. Applying the dynamics repeatedly gives imagined latents, which are read out with the same readout and decoder.*
+*Figure 1. **mini-WAM: everything on one latent.** The observation encoder produces $z_t$. The policy, the state readout and the image decoder read from $z_t$; the latent dynamics moves it forward given an action. Applying the dynamics repeatedly gives imagined latents, which are read out with the same readout and decoder.*
 
 The whole design rests on one idea: **everything lives on the same latent $z$.** The policy acts from $z$, the dynamics moves $z$ forward given an action, and the readouts turn *any* $z$, encoded from a real frame or imagined, back into a state and an image. Because the policy also reads $z$, the model can roll its own policy forward without ever touching the environment (the "dream" row in Figure 3).
 
 ### 3.2 Observation encoder → latent world state
 
-This part is mini-VLA, nearly unchanged (`models/encoders.py`, `models/fusion.py`):
+This part is a standard small VLA encoder (`models/encoders.py`, `models/fusion.py`, adapted from my earlier [mini-VLA](https://github.com/keivalya/mini-vla) project):
 
 $$z_t = \mathrm{LN}\big(\mathrm{MLP}([\,e_{\text{img}}(o_t);\ e_{\text{txt}}(\ell);\ e_{\text{state}}(\tilde s_t)\,])\big) \in \mathbb{R}^{128}$$
 
-where $\tilde s_t$ is the state normalized with dataset statistics. The one change is the image encoder: a three-layer CNN followed by a **spatial softmax** over 16 heatmaps, giving 16 $(x, y)$ keypoints plus a pooled feature vector. mini-VLA's TinyCNN with global average pooling is still available (`--image_encoder cnn`).
+where $\tilde s_t$ is the state normalized with dataset statistics. The image encoder is a three-layer CNN followed by a **spatial softmax** over 16 heatmaps, giving 16 $(x, y)$ keypoints plus a pooled feature vector. A plain CNN with global average pooling is also available (`--image_encoder cnn`).
 
 ### 3.3 Policy head
 
-The action head maps $z_t$ to $a_t$ and is the same as in mini-VLA: an MLP regressor, a DDPM diffusion head, or a flow-matching head (`models/action_heads.py`). All three expose `loss(actions, z)` and `sample(z)`, so the rest of the model never needs to know which head it is talking to.
+The action head maps $z_t$ to $a_t$: an MLP regressor, a DDPM diffusion head, or a flow-matching head (`models/action_heads.py`). All three expose `loss(actions, z)` and `sample(z)`, so the rest of the model never needs to know which head it is talking to.
 
-> **Bug fix carried back from mini-VLA.** The original diffusion head used a linear noise schedule from $10^{-4}$ to $10^{-2}$ with $T=16$ steps. That ends at $\bar\alpha_T \approx 0.92$, which means the "fully noised" action is still 92% signal. Sampling, though, starts from pure Gaussian noise the model never saw. mini-WAM switches to the cosine schedule of [Nichol & Dhariwal](https://doi.org/10.48550/arxiv.2102.09672) ($\bar\alpha_T \approx 10^{-5}$ at $T=16$) and samples from the proper DDPM posterior.
+> **A diffusion detail that is easy to get wrong.** My first diffusion head used a linear noise schedule from $10^{-4}$ to $10^{-2}$ with $T=16$ steps. That ends at $\bar\alpha_T \approx 0.92$, which means the "fully noised" action is still 92% signal. Sampling, though, starts from pure Gaussian noise the model never saw. mini-WAM switches to the cosine schedule of [Nichol & Dhariwal](https://doi.org/10.48550/arxiv.2102.09672) ($\bar\alpha_T \approx 10^{-5}$ at $T=16$) and samples from the proper DDPM posterior.
 
 ### 3.4 Latent dynamics: a learned simulator
 
@@ -173,7 +173,7 @@ with $R$ the state readout, $D$ the image decoder, $\mathrm{sg}$ stop-gradient, 
 * The **prediction** terms teach the dynamics what actions do.
 * The **latent consistency** term keeps imagined latents *in distribution*, so the policy and decoders still make sense when applied to them.
 
-Setting `--model_type vla` removes everything except $\mathcal{L}_{\text{act}}$ and gives back mini-VLA with identical encoders. That is the baseline in every experiment.
+Setting `--model_type vla` removes everything except $\mathcal{L}_{\text{act}}$, leaving a plain VLA with identical encoders. That **VLA baseline** is the comparison in every experiment.
 
 ### 3.7 How big is it?
 
@@ -227,7 +227,7 @@ Why bother? In pure expert data, $a_t$ is (up to a little noise) a function of $
 
 ### 5.1 Setup and metrics
 
-Every configuration is run **three times** (seeds 0, 1, 2). Each seed has its own dataset, its own split into training and held-out episodes (90/10) and its own initialization. Unless an experiment changes it, a dataset has 400 episodes and training runs for 15 epochs. Every run trains a mini-WAM *and* a mini-VLA on the same data, with the same encoders and MLP action head. I report mean ± standard deviation over the three seeds. All runs used single GPUs (mostly V100s) on Northeastern's Explorer cluster; a full three-seed run takes 15–30 minutes.
+Every configuration is run **three times** (seeds 0, 1, 2). Each seed has its own dataset, its own split into training and held-out episodes (90/10) and its own initialization. Unless an experiment changes it, a dataset has 400 episodes and training runs for 15 epochs. Every run trains a mini-WAM *and* the VLA baseline on the same data, with the same encoders and MLP action head. I report mean ± standard deviation over the three seeds. All runs used single GPUs (mostly V100s) on Northeastern's Explorer cluster; a full three-seed run takes 15–30 minutes.
 
 What I measure, all on held-out episodes:
 
@@ -252,7 +252,7 @@ Yes, at the level of the state, and no, at the level of pixels.
 * **States.** Fifteen steps into an open-loop imagination, the state error is $0.0071 \pm 0.0004$, about 80× lower than the "nothing changes" baseline ($0.582 \pm 0.015$). A linear readout recovers every state variable from the imagined latent with $R^2 \ge 0.98$ (seed means; overall mean $0.992 \pm 0.001$) at $k=15$.
 * **Actions.** Under random action sequences the expert never produced, the error after 10 steps is $0.0072 \pm 0.0005$, versus $0.388 \pm 0.001$ for a model that ignored the actions. So the world model has learned what actions *do*, not just what the expert usually did.
 * **Pixels.** The decoded imagination is *worse* than just copying the current frame at every horizon ($0.0073$ vs. $0.0050$ at $k=15$). Figure 3 shows why: the decoder draws the agent and the instructed goal, but drops the distractor goal. I come back to this in §6.
-* **The policy.** Both mini-WAM and mini-VLA succeed on 100% of test episodes in all three seeds (26.4 vs. 26.1 steps on average). This task is too easy to separate them; §5.6 makes it harder.
+* **The policy.** Both mini-WAM and the VLA baseline succeed on 100% of test episodes in all three seeds (26.4 vs. 26.1 steps on average). This task is too easy to separate them; §5.6 makes it harder.
 
 ![Imagination strip](figures/imagination-strip.png)
 
@@ -322,15 +322,15 @@ The numbers above say the latent world model works. The figures in this section 
 
 ### 5.6 When does a world model help the policy?
 
-Up to now the policy never benefited: mini-VLA was already at 100%. I tried two ways of making the task harder for the *policy*: fewer demonstrations, and taking away the state input.
+Up to now the policy never benefited: the VLA baseline was already at 100%. I tried two ways of making the task harder for the *policy*: fewer demonstrations, and taking away the state input.
 
 ![Data and state input](figures/fig-data-and-state.svg)
 
 *Figure 10. **The world-model objective hurts with very few demos, and helps a lot when the state must be inferred from pixels.** (a) Closed-loop success vs. number of demonstration episodes (15 epochs each). Open markers: the same 25 episodes trained ~15× longer, to match the baseline's number of gradient steps. (b) Success with and without the state input (400 episodes). Mean ± std over 3 seeds; 100 test episodes per seed.*
 
-**Few demonstrations: the WAM is *worse*.** With 25 episodes per seed, mini-WAM succeeds $87.0 \pm 7.8\%$ of the time vs. $99.7 \pm 0.5\%$ for mini-VLA. With 50 episodes the gap shrinks ($96.7 \pm 2.6\%$ vs. $99.7 \pm 0.5\%$), and with 100 it is gone ($100\%$ vs. $99.7 \pm 0.5\%$). One confound is training length. All runs use 15 epochs, so 25 episodes means about 1/16 of the baseline's gradient steps, and the WAM has more to learn in those steps. To check, I trained the same 25-episode datasets for 225 epochs, roughly the baseline's number of gradient steps. The gap mostly closes: $96.3 \pm 1.2\%$ for mini-WAM vs. $98.7 \pm 1.9\%$ for mini-VLA. So most of the low-data penalty was *undertraining*, presumably because the WAM has four losses to fit with the same encoder and needs more steps to get its policy right. What remains is a gap of about 2 points; mini-WAM is behind or tied in every seed (98/100, 95/100, 96/96%). Training longer does expose a new problem, though. The world model overfits its 23 training episodes badly (in the training log, image loss is 0.0005 on training data vs. 0.016 on held-out episodes; imagined-state $R^2$ at $k=15$ only $0.72 \pm 0.17$). Here, at least, the world model needed far more data than the policy.
+**Few demonstrations: the WAM is *worse*.** With 25 episodes per seed, mini-WAM succeeds $87.0 \pm 7.8\%$ of the time vs. $99.7 \pm 0.5\%$ for the VLA baseline. With 50 episodes the gap shrinks ($96.7 \pm 2.6\%$ vs. $99.7 \pm 0.5\%$), and with 100 it is gone ($100\%$ vs. $99.7 \pm 0.5\%$). One confound is training length. All runs use 15 epochs, so 25 episodes means about 1/16 of the baseline's gradient steps, and the WAM has more to learn in those steps. To check, I trained the same 25-episode datasets for 225 epochs, roughly the baseline's number of gradient steps. The gap mostly closes: $96.3 \pm 1.2\%$ for mini-WAM vs. $98.7 \pm 1.9\%$ for the VLA baseline. So most of the low-data penalty was *undertraining*, presumably because the WAM has four losses to fit with the same encoder and needs more steps to get its policy right. What remains is a gap of about 2 points; mini-WAM is behind or tied in every seed (98/100, 95/100, 96/96%). Training longer does expose a new problem, though. The world model overfits its 23 training episodes badly (in the training log, image loss is 0.0005 on training data vs. 0.016 on held-out episodes; imagined-state $R^2$ at $k=15$ only $0.72 \pm 0.17$). Here, at least, the world model needed far more data than the policy.
 
-**No state input: the WAM is much *better*.** When both models see only the image and the instruction, mini-WAM succeeds $80.3 \pm 12.0\%$ of the time and mini-VLA only $36.0 \pm 19.8\%$ (mean episode length 32.5 vs. 60.1 steps). The spread across seeds is large, but the WAM is ahead in every seed (WAM/VLA success: 97/23, 69/64 and 75/21%).
+**No state input: the WAM is much *better*.** When both models see only the image and the instruction, mini-WAM succeeds $80.3 \pm 12.0\%$ of the time and the VLA baseline only $36.0 \pm 19.8\%$ (mean episode length 32.5 vs. 60.1 steps). The spread across seeds is large, but the WAM is ahead in every seed (WAM/VLA success: 97/23, 69/64 and 75/21%).
 
 Why does the world model help so much here? The probe gives a clean answer. Velocity is invisible in a single frame, and it matters: the agent has momentum, and the expert brakes before the goal. Look at the linear readout of mini-WAM's latent:
 
