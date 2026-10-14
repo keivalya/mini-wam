@@ -153,7 +153,7 @@ $$\hat z_{t} = z_t,\qquad \hat z_{t+k} = f_\theta(\hat z_{t+k-1},\, a_{t+k-1}),\
 ### 3.5 Readouts: making the latent readable
 
 * **State readout** (`StateReadout`): by default a single linear layer, $\hat s = W z + b$. If agent position and velocity can be recovered *linearly* from $z$, they are explicitly encoded there, and the rows of $W$ tell you which latent directions mean what. This is a linear probe ([Alain & Bengio](https://www.alphaxiv.org/abs/1610.01644)), trained jointly with everything else and applied to real *and* imagined latents.
-* **Image decoder** (`models/image_decoder.py`): $z \to 128\times4\times4 \to$ four (upsample + conv) blocks $\to 3\times64\times64$. It predicts the *difference from the dataset's mean image*, with no sigmoid. Most pixels are static background, so the decoder starts out already drawing the background. A sigmoid output saturates, and in my first version that stalled learning completely.
+* **Image decoder** (`models/image_decoder.py`): $z \to 128\times4\times4 \to$ four (upsample + conv) blocks $\to 3\times64\times64$. It predicts the *difference from the dataset's mean image*, with no sigmoid. Most pixels are static background, so the decoder starts out already drawing the background. In my first version, with a sigmoid output, the decoder got stuck: after two epochs its error was worse than just predicting the mean image.
 
 ### 3.6 Training objective
 
@@ -219,7 +219,7 @@ and an episode succeeds when the agent is within 0.05 of the instructed goal **a
 
 `scripts/collect_data.py` runs the expert, and at each step starts, with probability $p$ (default 0.3), a burst of 1–3 uniformly random actions. Each transition is tagged `is_expert`. **The policy imitates only expert steps; the world model trains on all of them.**
 
-Why bother? In pure expert data, $a_t$ is a function of $s_t$. A world model can then predict $s_{t+1}$ from $s_t$ alone and never look at the action. This is the world-model version of *causal confusion* in imitation learning ([de Haan et al.](https://doi.org/10.48550/arxiv.1905.11979)): a shortcut that fits the data perfectly and fails as soon as you ask about an action the expert didn't take. §5.3 measures it.
+Why bother? In pure expert data, $a_t$ is (up to a little noise) a function of $s_t$. A world model can then predict $s_{t+1}$ from $s_t$ alone and never look at the action. This is the world-model version of *causal confusion* in imitation learning ([de Haan et al.](https://doi.org/10.48550/arxiv.1905.11979)): a shortcut that fits the data perfectly and fails as soon as you ask about an action the expert didn't take. §5.3 measures it.
 
 ---
 
@@ -227,7 +227,7 @@ Why bother? In pure expert data, $a_t$ is a function of $s_t$. A world model can
 
 ### 5.1 Setup and metrics
 
-Every configuration is run **three times** (seeds 0, 1, 2). Each seed has its own dataset (400 episodes), its own train/held-out split (360/40 episodes) and its own initialization. Every run trains a mini-WAM *and* a mini-VLA on the same data with the same encoders and MLP action head, for 15 epochs. I report mean ± standard deviation over the three seeds. All runs were done on single GPUs (mostly V100s) on Northeastern's Explorer cluster; one full three-seed run takes about 15 minutes.
+Every configuration is run **three times** (seeds 0, 1, 2). Each seed has its own dataset, its own split into training and held-out episodes (90/10) and its own initialization. Unless an experiment changes it, a dataset has 400 episodes and training runs for 15 epochs. Every run trains a mini-WAM *and* a mini-VLA on the same data, with the same encoders and MLP action head. I report mean ± standard deviation over the three seeds. All runs used single GPUs (mostly V100s) on Northeastern's Explorer cluster; a full three-seed run takes 15–30 minutes.
 
 What I measure, all on held-out episodes:
 
@@ -235,7 +235,7 @@ What I measure, all on held-out episodes:
 |---|---|---|
 | **closed-loop success** | Does the policy solve the task? 100 episodes per seed, on environment seeds never seen in training. | WAM vs. VLA |
 | **imagined state error** at $k$ steps | Encode $o_t$ once, roll the dynamics forward $k$ steps with the actions that were really taken, read out the state, and compare it with the true $s_{t+k}$ (MSE in normalized units). | the **"nothing changes"** baseline $\hat s_{t+k}=s_t$ |
-| **counterfactual error** at $k$ steps | Same, but with *random* action sequences the expert never took, compared against the toy simulator's ground truth. | the **"ignore the actions"** baseline: the true future under zero actions |
+| **counterfactual error** at $k$ steps | Same, but with *random* action sequences the expert never took, compared against the toy simulator's ground truth (agent position and velocity; 8 random plans from every 5th step of each held-out episode). | the **"ignore the actions"** baseline: the true future under zero actions |
 | **image error** | Pixel MSE between the decoded imagined frame and the real future frame. | copying the current frame |
 | **readout $R^2$** | How much of each state variable a *linear* map recovers from real ($k=0$) and imagined ($k>0$) latents. | 1 = perfect |
 
