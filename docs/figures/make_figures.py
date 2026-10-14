@@ -180,7 +180,7 @@ def fig_exploration(exps):
     panel_label(ax, "a")
 
     ax = axes[1]
-    for off, (key, color, label) in zip([-0.008, 0.008], [("wam_test", WAM, "mini-WAM"), ("vla_test", VLA, "mini-VLA")]):
+    for off, (key, color, label) in zip([-0.008, 0.008], [("wam_test", WAM, "mini-WAM"), ("vla_test", VLA, "VLA baseline")]):
         m, sd = series(lambda s, key=key: s[key]["success_rate"])
         ax.errorbar(np.array(xs) + off, 100 * m, yerr=100 * sd, color=color, marker="o", ms=3.5, capsize=2, label=label)
     ax.set_xticks(xs)
@@ -247,7 +247,7 @@ def fig_data_and_state(exps):
     fig, axes = plt.subplots(1, 2, figsize=(WIDTH * 0.75, 2.0), gridspec_kw={"width_ratios": [1.6, 1]})
     ax = axes[0]
     xs = [n for n, _ in pts]
-    for key, color, label in [("wam_test", WAM, "mini-WAM"), ("vla_test", VLA, "mini-VLA")]:
+    for key, color, label in [("wam_test", WAM, "mini-WAM"), ("vla_test", VLA, "VLA baseline")]:
         vals = [scalar(exps[name], lambda s, key=key: 100 * s[key]["success_rate"]) for _, name in pts]
         ax.errorbar(xs, [v[0] for v in vals], yerr=[v[1] for v in vals], color=color, marker="o", ms=3.5,
                     capsize=2, label=label)
@@ -270,7 +270,7 @@ def fig_data_and_state(exps):
     if has_img:
         groups = [("baseline", "state + image"), ("image-only", "image only")]
         xpos = np.arange(len(groups))
-        for off, (key, color, label) in zip([-0.17, 0.17], [("wam_test", WAM, "mini-WAM"), ("vla_test", VLA, "mini-VLA")]):
+        for off, (key, color, label) in zip([-0.17, 0.17], [("wam_test", WAM, "mini-WAM"), ("vla_test", VLA, "VLA baseline")]):
             vals = [scalar(exps[g], lambda s, key=key: 100 * s[key]["success_rate"]) for g, _ in groups]
             ax.bar(xpos + off, [v[0] for v in vals], yerr=[v[1] for v in vals], width=0.32, color=color,
                    label=label, capsize=2, error_kw={"lw": 0.8})
