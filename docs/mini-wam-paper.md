@@ -259,6 +259,26 @@ Yes, at the level of the state, and no, at the level of pixels.
 *Figure 3. **One held-out episode, as the model sees it.** Row 1: real frames. Row 2: decoding the latent of each real frame. Row 3: decoding an open-loop imagination from $t=0$ with the real actions. The model never sees frames 1–28. Row 4: "dreaming", where the model's own policy picks the actions inside its imagination. Seed 0.*
 
 ### 5.3 Does the world model understand actions? (exploration data)
+
+This is the experiment that taught me the most. I trained three world models that differ *only* in the data: 0%, 30% or 60% of steps start a short burst of random actions. Everything else, including the number of episodes, is the same.
+
+![Exploration](figures/fig-exploration.svg)
+
+*Figure 4. **Trained on expert demos alone, the world model is great at predicting what happened and poor at predicting anything else.** (a) Imagined state error after 10 steps with the real actions (factual, green) and with random actions compared to the true simulator (counterfactual, orange). Grey: the error of a model that ignores the actions altogether. (b) Closed-loop success. Mean ± std over 3 seeds.*
+
+With expert-only data the factual error is the *lowest* of the three settings ($0.0047 \pm 0.0025$ at $k=15$, vs. $0.0071 \pm 0.0004$ with 30% exploration). If factual prediction were all you checked, you would conclude expert-only data is best. The counterfactual error says otherwise: $0.112 \pm 0.005$ at $k=10$, **15× worse** than with exploration ($0.0072 \pm 0.0005$). It is still better than ignoring actions entirely (0.295), so the model uses the action a little, but mostly it has learned *"the expert will drive toward the goal"*.
+
+Why? In expert data the action is a deterministic-ish function of the state, $a_t \approx \pi^*(s_t)$, so
+
+$$s_{t+1} = f(s_t, a_t) \approx f(s_t, \pi^*(s_t)) =: g(s_t).$$
+
+The network can fit $g$ without ever using its action input. Nothing in the loss tells it that $a_t$ matters, because $a_t$ carries no information beyond $s_t$. Imitation learning has the same disease under the name *causal confusion* ([de Haan et al.](https://doi.org/10.48550/arxiv.1905.11979)). The fix is the same too: break the correlation by putting actions into the data that the expert would not have chosen. A few random bursts are enough. Going from 30% to 60% exploration changes little ($0.0063 \pm 0.0023$).
+
+Two lessons I'd carry to big WAMs:
+
+1. **Measure counterfactuals, not just reconstruction.** Video-prediction quality on held-out demos is a factual metric. It can look great while the model ignores the action. AD-WM makes the same point for planning ([AD-WM](https://www.alphaxiv.org/abs/2609.30264)).
+2. **The policy does not care, yet.** All three settings reach 100% success, and the policy only imitates expert steps, so exploration data cost nothing here. The world model needs action diversity; the policy needs expert quality. Tagging transitions (`is_expert`) lets one dataset serve both.
+
 ### 5.4 Which parts of the objective matter?
 ### 5.5 When does a world model help the policy?
 ### 5.6 Looking inside the world model
