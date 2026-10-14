@@ -10,23 +10,29 @@ import torch.nn.functional as F
 @dataclass
 class DiffusionConfig:
     T: int = 16  # number of diffusion steps
-    beta_start: float = 1e-4
-    beta_end: float = 1e-2
     action_dim: int = 4
     cond_dim: int = 128 # conditional input dim
+    cosine_s: float = 0.008  # offset of the cosine schedule
 
 
 def make_beta_schedule(cfg: DiffusionConfig):
     """
-    Compute a schedule for linear beta values from beta_start to beta_end.
+    Cosine noise schedule (Nichol & Dhariwal, 2021).
 
-    param cfg: A DiffusionConfig object containing the diffusion hyperparameters.
-    return: A tuple of tensors containing the beta values, alpha values and alpha bar values.
+    With only T = 16 steps, a linear schedule from 1e-4 to 1e-2 ends at
+    alpha_bar_T ~ 0.92: the "fully noised" action is still 92% signal, yet
+    sampling starts from pure Gaussian noise the model never saw in training.
+    The cosine schedule reaches alpha_bar_T ~ 0 for any T.
+
+    return: betas, alphas, alpha_bar, each of shape (T,)
     """
-    betas = torch.linspace(cfg.beta_start, cfg.beta_end, cfg.T)
+    steps = torch.arange(cfg.T + 1, dtype=torch.float64) / cfg.T
+    f = torch.cos((steps + cfg.cosine_s) / (1 + cfg.cosine_s) * math.pi / 2) ** 2
+    alpha_bar = f / f[0]
+    betas = (1 - alpha_bar[1:] / alpha_bar[:-1]).clamp(max=0.999)
     alphas = 1.0 - betas
     alpha_bar = torch.cumprod(alphas, dim=0)
-    return betas, alphas, alpha_bar
+    return betas.float(), alphas.float(), alpha_bar.float()
 
 class SinusoidalTimeEmbedding(nn.Module):
     def __init__(self, dim: int):
@@ -142,13 +148,18 @@ class DiffusionPolicyHead(nn.Module):
             alpha_t = self.alphas[t_step]
             alpha_bar_t = self.alpha_bar[t_step]
 
-            # now reverse diffusion  (aka DDPM)
-            # mean = (1 / torch.sqrt(alpha_t)) * (x_t - beta_t / torch.sqrt(1 - alpha_bar_t) * eps_pred) # original
-            x0_pred = (x_t - torch.sqrt(1 - alpha_bar_t) * eps_pred) / torch.sqrt(alpha_bar_t) # simplified
+            # reverse diffusion (DDPM): predict x0, then sample x_{t-1} from the
+            # Gaussian posterior q(x_{t-1} | x_t, x0)
+            x0_pred = (x_t - torch.sqrt(1 - alpha_bar_t) * eps_pred) / torch.sqrt(alpha_bar_t)
+            x0_pred = x0_pred.clamp(-1.0, 1.0)  # actions live in [-1, 1]
             if t_step > 0:
-                noise = torch.randn_like(x_t)
-                # x_t = mean + torch.sqrt(beta_t) * noise # original
-                x_t = torch.sqrt(alpha_t) * x0_pred + torch.sqrt(beta_t) * noise
+                alpha_bar_prev = self.alpha_bar[t_step - 1]
+                mean = (
+                    torch.sqrt(alpha_bar_prev) * beta_t / (1 - alpha_bar_t) * x0_pred
+                    + torch.sqrt(alpha_t) * (1 - alpha_bar_prev) / (1 - alpha_bar_t) * x_t
+                )
+                var = beta_t * (1 - alpha_bar_prev) / (1 - alpha_bar_t)
+                x_t = mean + torch.sqrt(var) * torch.randn_like(x_t)
             else:
-                x_t = x0_pred # x0_pred or mean
+                x_t = x0_pred
         return x_t
