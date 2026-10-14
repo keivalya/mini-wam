@@ -293,6 +293,37 @@ Next I removed one piece of the objective at a time, and changed the length $H$ 
 * **None of it changes the policy.** All variants reach 99–100% closed-loop success.
 
 ### 5.5 When does a world model help the policy?
+
+Up to now the policy never benefited: mini-VLA was already at 100%. I tried two ways of making the task harder for the *policy*: fewer demonstrations, and taking away the state input.
+
+![Data and state input](figures/fig-data-and-state.svg)
+
+*Figure 10. **The world-model objective hurts with very few demos, and helps a lot when the state must be inferred from pixels.** (a) Closed-loop success vs. number of demonstration episodes (15 epochs each). Open markers: the same 25 episodes trained ~15× longer, to match the baseline's number of gradient steps. (b) Success with and without the state input (400 episodes). Mean ± std over 3 seeds; 100 test episodes per seed.*
+
+**Few demonstrations: the WAM is *worse*.** With 25 episodes per seed, mini-WAM succeeds $87.0 \pm 7.8\%$ of the time vs. $99.7 \pm 0.5\%$ for mini-VLA. With 50 episodes the gap shrinks ($96.7 \pm 2.6\%$ vs. $99.7 \pm 0.5\%$), and with 100 it is gone ($100\%$ vs. $99.7 \pm 0.5\%$). One confound is training length. All runs use 15 epochs, so 25 episodes means about 1/16 of the baseline's gradient steps, and the WAM has more to learn in those steps. *[Matched-steps result goes here.]*
+
+**No state input: the WAM is much *better*.** When both models see only the image and the instruction, mini-WAM succeeds $80.3 \pm 12.0\%$ of the time and mini-VLA only $36.0 \pm 19.8\%$ (mean episode length 32.5 vs. 60.1 steps). The spread across seeds is large, but the WAM is ahead in every seed (WAM/VLA success: 97/23, 69/64 and 75/21%).
+
+Why does the world model help so much here? The probe gives a clean answer. Velocity is invisible in a single frame, and it matters: the agent has momentum, and the expert brakes before the goal. Look at the linear readout of mini-WAM's latent:
+
+| readout $R^2$ | position $(x, y)$ | velocity $(v_x, v_y)$ |
+|---|---|---|
+| encoded current frame ($k=0$) | 0.994 / 0.993 | **0.47 / 0.50** |
+| after 1 imagined step | 0.994 / 0.992 | 0.69 / 0.71 |
+| after 5 imagined steps | 0.985 / 0.981 | **0.92 / 0.93** |
+
+*(Image-only run, mean of 3 seeds; full numbers in `docs/results/image-only`.)*
+
+From pixels alone, the latent knows *where* the agent is but only about half of *how fast* it is going. After a few imagined steps it knows velocity well, because the dynamics model integrates the actions it was given. If you have built a Kalman filter, this is the *predict* step: a motion model plus known controls recovers a state you cannot observe directly. The WAM is forced to learn that motion model; the VLA is not.
+
+The keypoints tell the same story (Figure 11). Without the state input, the spatial-softmax keypoints that had collapsed to the image center in the baseline (Figure 9) now lock onto the agent and the goals.
+
+![Keypoints, image only](figures/keypoints-image-only.png)
+
+*Figure 11. **Without the state input, the encoder learns to look.** Several keypoints follow the red agent; others sit on the goals. Seed 0 of the image-only run.*
+
+One caveat: mini-WAM's *policy* still acts on the encoding of the current frame. It never uses the imagined velocity at test time. So the benefit comes from training: predicting the future forces the shared encoder to represent things, like motion cues, that help the policy as well. A policy that consumes the imagination directly, or a short history of frames, would probably do better still. I have not tested either.
+
 ### 5.6 Looking inside the world model
 
 The numbers above say the latent world model works. The figures in this section show *what it believes*. All are produced by `scripts/visualize_rollout.py` for seed 0 of the baseline.
