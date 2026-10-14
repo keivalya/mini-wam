@@ -6,6 +6,11 @@ Questions this answers (all on episodes the model never trained on):
 2. Can it imagine the future?                      state / image error vs imagination step k
 3. Is imagination better than "nothing changes"?   compared against a copy-current baseline
 4. Which physical quantities live in the latent?   R^2 per state variable
+5. Does it understand *actions*?                   toy env only: imagine the
+   future under random action sequences the expert never took, and compare
+   against the true simulator ("counterfactual error"). A model that ignores
+   actions scores like the "no-op" baseline, which predicts the future the
+   agent would have had without acting.
 
 The imagination here is open-loop: encode o_t once, then roll the latent
 dynamics forward with the actions that were really taken, never looking at
@@ -38,7 +43,14 @@ def parse_args():
 # ----------------------------------------------------------------- loading
 
 
+def resolve_device(device):
+    if device == "auto":
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    return device
+
+
 def load_model_and_data(checkpoint, dataset_path=None, device="cpu"):
+    device = resolve_device(device)
     model, ckpt = MiniWAMPolicy.from_checkpoint(checkpoint, device=device)
     data = dict(np.load(dataset_path or ckpt["dataset_path"], allow_pickle=True))
     return model, ckpt, data
@@ -181,8 +193,65 @@ def evaluate(model, data, episodes, max_horizon=15):
     return results
 
 
+@torch.no_grad()
+def evaluate_counterfactuals(model, data, episodes, horizon=10, n_plans=8, every=5, seed=0):
+    """
+    Toy env only. For starts every `every` steps of each held-out episode, draw
+    `n_plans` random action sequences, imagine with each, and compare the
+    imagined agent position/velocity with the true simulator.
+
+    returns per-k normalized MSE of:
+        wam   : imagined vs true future under the random actions
+        noop  : true future under zero actions vs true future under the random
+                actions (what you'd score by ignoring the actions)
+    """
+    from envs.toy_point_env import ToyPointEnv
+
+    sim = ToyPointEnv()
+    rng = np.random.default_rng(seed)
+    dims = [0, 1, 2, 3]  # agent_x, agent_y, vel_x, vel_y
+    std = model.state_std.cpu().numpy()[dims]
+    dev = model.state_mean.device
+
+    err_wam = np.zeros(horizon)
+    err_noop = np.zeros(horizon)
+    count = 0
+
+    for e in episodes:
+        ep = get_episode(data, e, device=dev)
+        T = ep["actions"].shape[0]
+        for t in range(0, T, every):
+            plans = rng.uniform(-1, 1, size=(n_plans, horizon, 2)).astype(np.float32)
+            s0 = ep["states"][t].cpu().numpy()
+
+            truth = np.stack([sim.simulate(s0, p) for p in plans])[..., dims]           # (P, H, 4)
+            noop = sim.simulate(s0, np.zeros((horizon, 2), np.float32))[None, :, dims]  # (1, H, 4)
+
+            out = model.imagine(
+                ep["images"][t : t + 1].expand(n_plans, -1, -1, -1),
+                ep["text_ids"].expand(n_plans, -1),
+                ep["states"][t : t + 1].expand(n_plans, -1),
+                horizon,
+                torch.from_numpy(plans).to(dev),
+            )
+            pred = out["state"][:, 1:].cpu().numpy()[..., dims]                          # (P, H, 4)
+
+            err_wam += (((pred - truth) / std) ** 2).mean(axis=(0, 2))
+            err_noop += (((noop - truth) / std) ** 2).mean(axis=(0, 2))
+            count += 1
+
+    return {
+        "horizon": list(range(1, horizon + 1)),
+        "wam_nmse": (err_wam / count).tolist(),
+        "noop_nmse": (err_noop / count).tolist(),
+        "n_starts": count,
+        "n_plans": n_plans,
+    }
+
+
 def main():
     args = parse_args()
+    args.device = resolve_device(args.device)
     model, ckpt, data = load_model_and_data(args.checkpoint, args.dataset_path, args.device)
 
     if not model.is_wam:
@@ -210,6 +279,14 @@ def main():
         for j, name in enumerate(labels):
             row = [results["state_r2"][k][j] for k in sorted(set(show))]
             print(f"{name:>14} " + " ".join(f"{'—':>7}" if r is None else f"{r:>7.3f}" for r in row))
+
+    if ckpt.get("env") == "toy" and model.predict_state:
+        cf = evaluate_counterfactuals(model, data, episodes)
+        results["counterfactual"] = cf
+        print(f"\nCounterfactual imagination ({cf['n_starts']} starts x {cf['n_plans']} random plans)")
+        print(f"{'k':>3} {'WAM nMSE':>9} {'no-op':>8}")
+        for k, w, n in zip(cf["horizon"], cf["wam_nmse"], cf["noop_nmse"]):
+            print(f"{k:>3} {w:>9.4f} {n:>8.4f}")
 
     output = args.output or os.path.splitext(args.checkpoint)[0] + "_eval.json"
     with open(output, "w") as f:
