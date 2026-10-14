@@ -323,7 +323,33 @@ The numbers above say the latent world model works. The figures in this section 
 
 ## 6. Discussion and lessons
 
-*[To be written after the results.]*
+Here is what I would tell someone moving from VLAs to WAMs, based on what this small model did.
+
+**1. A WAM is a VLA with a learned simulator attached, and the simulator can be very good.** mini-WAM's latent dynamics is a 132k-parameter residual MLP. On held-out episodes it imagines 15 steps ahead with about 80× less error than assuming nothing changes, and a single linear layer reads position, velocity and goal out of every imagined latent. If you have used a forward model in MPC, this is the same object, learned from pixels + language + state instead of written down.
+
+**2. "Predicts the future well" and "understands actions" are different claims. Test both.** The expert-only world model had the *best* factual imagination and the *worst* counterfactual one (§5.3). Any metric computed on held-out *demonstrations* (reconstruction, video quality, next-state MSE) is factual. To know whether the model would be useful for choosing *between* actions, you need counterfactual data or a simulator to check against. This connects to a broader point in the literature: "a model can therefore achieve low factual prediction error yet poorly distinguish candidate actions" ([AD-WM](https://www.alphaxiv.org/abs/2609.30264)).
+
+**3. The world model needs different data than the policy.** The policy wants expert actions; the world model wants *varied* actions. Mixing a few random bursts into the demos and tagging them (`is_expert`) served both at no cost to the policy. For real robots, the same role could be played by play data, failed attempts, or autonomous rollouts, which are data a pure imitation learner would throw away.
+
+**4. You get good at the horizon you train on.** One-step training compounds errors; ten-step training trades a bit of one-step accuracy for much better long rollouts (§5.4). If you plan to imagine $k$ steps ahead, train on windows of about $k$ steps.
+
+**5. Pixels are an expensive and misleading target.** mini-WAM's decoded imagination was worse than copying the frame, mostly because it drops the distractor goal, an object that is irrelevant to the instructed task. Meanwhile the *state* of the imagination was excellent. Large WAMs face the same tension at scale. Chen et al.'s MiniWAM, for example, predicts compact learned future representations instead of native visual features and reports that this is both cheaper and better for policy learning ([MiniWAM](https://www.alphaxiv.org/abs/2610.12194)). The survey makes the general point that predictive fidelity is not the same as control utility ([Survey](https://www.alphaxiv.org/abs/2609.16074)).
+
+**6. A world-model objective does not automatically make a better policy.** *[Low-data and image-only conclusions go here.]*
+
+### Limitations
+
+* **Toy world, one task family.** Everything here is a 2D point mass with two goals. The dynamics are smooth and fully observed when the state is an input. Contact, occlusion and long horizons are where WAMs are supposed to shine, and none of them are present.
+* **The world model is never *used* at test time.** mini-WAM's policy acts reactively from $z_t$, exactly like a VLA. The world model shapes the latent during training, and `imagine()` is used for analysis, but there is no planning. Using the imagination to choose actions (MPC, or training the policy inside the dream as Dreamer does) is the obvious next step.
+* **Small study.** Three seeds per configuration, one set of hyperparameters (tuned for the baseline), 15 epochs, MLP action head only.
+* **The counterfactual test only checks agent position and velocity**, and only in the toy world, where a true simulator exists.
+
+### What I'd try next
+
+1. **Plan with the world model.** Sample action sequences, imagine each with `model.imagine(..., actions=...)`, score the imagined states against the goal, and execute the best first action. Everything needed is already in the code.
+2. **Make the task need foresight:** obstacles, a goal that moves, or delayed effects.
+3. **Meta-World.** `collect_data.py` and `test.py` already support it.
+
 
 ## 7. Reproducing everything
 
