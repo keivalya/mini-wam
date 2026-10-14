@@ -37,7 +37,10 @@ else
   fi
   PKG_HASH="$(echo "$PKGS $PY_SPEC $TORCH_INDEX" | cksum | cut -d' ' -f1)"
   VENV="$HOME/.cache/mini-wam/venv-$PKG_HASH"
-  if [ ! -x "$VENV/bin/python" ]; then
+  # .ready is written only after a complete install, so an interrupted
+  # install is rebuilt instead of silently reused
+  if [ ! -f "$VENV/.ready" ]; then
+    rm -rf "$VENV"
     echo "[run] creating venv $VENV (python $PY_SPEC, torch from $TORCH_INDEX)"
     mkdir -p "$(dirname "$VENV")"
     if command -v uv >/dev/null 2>&1; then
@@ -50,6 +53,7 @@ else
       "$VENV/bin/pip" install torch --index-url "$TORCH_INDEX"
       "$VENV/bin/pip" install $PKGS
     fi
+    touch "$VENV/.ready"
   fi
   PYV="$VENV/bin/python"
 fi
