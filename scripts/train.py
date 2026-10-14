@@ -309,6 +309,30 @@ def format_logs(logs):
     return " ".join(f"{short[k]}={logs[k]:.4f}" for k in short if k in logs)
 
 
+def save_checkpoint(model, full, train_eps, val_eps, horizon, args, history):
+    torch.save(
+        {
+            "model_state_dict": model.state_dict(),
+            "model_config": model.config,
+            "vocab": full.vocab,
+            "state_labels": full.state_labels,
+            "train_episodes": train_eps.tolist(),
+            "val_episodes": val_eps.tolist(),
+            "horizon": horizon,
+            "env": full.env if full.env != "unknown" else args.env,
+            "task": args.task,
+            "resize_to": args.resize_to,
+            "dataset_path": args.dataset_path,
+            "args": vars(args),
+            "history": history,
+        },
+        args.save_path,
+    )
+
+    with open(os.path.splitext(args.save_path)[0] + "_history.json", "w") as f:
+        json.dump(history, f, indent=2)
+
+
 def main():
     args = parse_args()
     torch.manual_seed(args.seed)
@@ -381,27 +405,8 @@ def main():
         if val_logs:
             print(f"{'':>{len(str(args.epochs)) * 2 + 7}} val:   {format_logs(val_logs)}")
 
-    torch.save(
-        {
-            "model_state_dict": model.state_dict(),
-            "model_config": model.config,
-            "vocab": full.vocab,
-            "state_labels": full.state_labels,
-            "train_episodes": train_eps.tolist(),
-            "val_episodes": val_eps.tolist(),
-            "horizon": horizon,
-            "env": full.env if full.env != "unknown" else args.env,
-            "task": args.task,
-            "resize_to": args.resize_to,
-            "dataset_path": args.dataset_path,
-            "args": vars(args),
-            "history": history,
-        },
-        args.save_path,
-    )
-
-    with open(os.path.splitext(args.save_path)[0] + "_history.json", "w") as f:
-        json.dump(history, f, indent=2)
+        # save every epoch, so an interrupted run still leaves a usable checkpoint
+        save_checkpoint(model, full, train_eps, val_eps, horizon, args, history)
 
     print("Saved checkpoint:", args.save_path)
 
