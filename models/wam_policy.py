@@ -57,6 +57,7 @@ class MiniWAMPolicy(nn.Module):
         predict_state=True,
         predict_image=True,
         linear_readout=True,
+        use_state_input=True,
         diffusion_T=16,
         flow_steps=8,
     ):
@@ -78,6 +79,7 @@ class MiniWAMPolicy(nn.Module):
             predict_state=predict_state,
             predict_image=predict_image,
             linear_readout=linear_readout,
+            use_state_input=use_state_input,
             diffusion_T=diffusion_T,
             flow_steps=flow_steps,
         )
@@ -85,6 +87,7 @@ class MiniWAMPolicy(nn.Module):
         self.is_wam = model_type == "wam"
         self.predict_state = self.is_wam and predict_state
         self.predict_image = self.is_wam and predict_image
+        self.use_state_input = use_state_input
 
         # observation encoder: (image, text, state) -> z
         self.img_encoder = build_image_encoder(image_encoder, d_model=d_model)
@@ -145,6 +148,9 @@ class MiniWAMPolicy(nn.Module):
         img_token = self.img_encoder(image)
         txt_token = self.txt_encoder(text_tokens)
         state_token = self.state_encoder(self.normalize_state(state))
+        if not self.use_state_input:
+            # image + language only: the model must infer the state from pixels
+            state_token = torch.zeros_like(state_token)
         return self.fusion(img_token, txt_token, state_token)
 
     def encode_sequence(self, images, text_tokens, states):
