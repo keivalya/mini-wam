@@ -1,4 +1,4 @@
-"""Build every data figure of the picoWAM paper.
+"""Build every data figure of the pico-WAM paper.
 
 Inputs (all committed):
     docs/results/<experiment>/seed*/        per-seed evaluation and closed-loop JSON
@@ -34,7 +34,7 @@ FIGDATA = os.path.join(RESULTS, "figure-data")
 W = fs.TEXT  # 5.5 in, the paper's \textwidth
 
 # one colour per role, used identically in every figure
-WAM = fs.PALETTE["red"]        # picoWAM
+WAM = fs.PALETTE["red"]        # pico-WAM
 VLA = fs.PALETTE["blue"]       # VLA baseline
 FACT = fs.PALETTE["green"]     # factual imagination (real actions)
 DREAM = fs.PALETTE["purple"]   # dreamed (own policy)
@@ -99,7 +99,7 @@ def fig_imagination_quality(base):
     ax = axes[0]
     k = np.arange(1, 16)  # k = 0 is the current state, where "nothing changes" is exact
     band(ax, k, curves(base, lambda s: s["eval"]["state_nmse_copy"])[:, 1:16], REF, '"nothing changes"', ls="--", marker="s")
-    band(ax, k, curves(base, lambda s: s["eval"]["state_nmse"])[:, 1:16], WAM, "picoWAM")
+    band(ax, k, curves(base, lambda s: s["eval"]["state_nmse"])[:, 1:16], WAM, "pico-WAM")
     ax.set_yscale("log")
     ax.set_xlabel("imagined steps $k$")
     ax.set_ylabel("state error (normalized MSE)")
@@ -107,7 +107,7 @@ def fig_imagination_quality(base):
     ax = axes[1]
     k = np.arange(1, 11)
     band(ax, k, curves(base, lambda s: s["eval"]["counterfactual"]["noop_nmse"]), REF, "ignore the actions", ls="--", marker="s")
-    band(ax, k, curves(base, lambda s: s["eval"]["counterfactual"]["wam_nmse"]), WAM, "picoWAM")
+    band(ax, k, curves(base, lambda s: s["eval"]["counterfactual"]["wam_nmse"]), WAM, "pico-WAM")
     ax.set_yscale("log")
     ax.set_xlabel("imagined steps $k$ (random actions)")
     ax.set_ylabel("counterfactual error (nMSE)")
@@ -115,7 +115,7 @@ def fig_imagination_quality(base):
     ax = axes[2]
     k = np.arange(1, 16)
     band(ax, k, curves(base, lambda s: s["eval"]["image_mse_copy"])[:, 1:16], REF, "copy current frame", ls="--", marker="s")
-    band(ax, k, curves(base, lambda s: s["eval"]["image_mse"])[:, 1:16], WAM, "picoWAM (decoded)")
+    band(ax, k, curves(base, lambda s: s["eval"]["image_mse"])[:, 1:16], WAM, "pico-WAM (decoded)")
     ax.set_ylim(0, 0.009)
     ax.set_xlabel("imagined steps $k$")
     ax.set_ylabel("image error (pixel MSE)")
@@ -174,7 +174,7 @@ def fig_exploration(exps):
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.3), ncol=1)
 
     ax = axes[1]
-    for off, key, color, label in [(-0.012, "wam_test", WAM, "picoWAM"), (0.012, "vla_test", VLA, "VLA baseline")]:
+    for off, key, color, label in [(-0.012, "wam_test", WAM, "pico-WAM"), (0.012, "vla_test", VLA, "VLA baseline")]:
         vals = np.stack([per_seed(exps[n], lambda s, key=key: 100 * s[key]["success_rate"]) for _, n in settings])
         ax.errorbar(xs + off, vals.mean(1), yerr=vals.std(1), color=color, marker="o", ms=3.5, capsize=2, lw=1.1, label=label)
     ax.set_xticks(xs)
@@ -273,7 +273,7 @@ def fig_what_if():
     ax.set_xlabel("agent $x$")
     ax.set_ylabel("agent $y$")
     ax.legend([Line2D([], [], color="0.3", ls="--", lw=1.3), Line2D([], [], color="0.3", lw=0.8)],
-              ["imagined", "true simulator"], loc="upper center", bbox_to_anchor=(0.5, -0.22), ncol=2, fontsize=6)
+              ["imagined", "true simulator"], loc="upper center", bbox_to_anchor=(0.5, -0.30), ncol=2, fontsize=6)
 
     # (b) decoded frames after 15 imagined steps, compass layout
     sub = gs[1].subgridspec(3, 3, wspace=0.04, hspace=0.04)
@@ -292,7 +292,7 @@ def fig_what_if():
     err, ign = d["endpoint_error"], d["ignore_push_error"]  # (seeds, directions)
     x = np.arange(len(names))
     ax_c.bar(x - 0.2, ign.mean(0), 0.4, color=fs.MUTED, edgecolor=REF, lw=0.5, label="ignore the push")
-    ax_c.bar(x + 0.2, err.mean(0), 0.4, yerr=err.std(0), color=WAM, capsize=1.5, error_kw={"lw": 0.6}, label="picoWAM")
+    ax_c.bar(x + 0.2, err.mean(0), 0.4, yerr=err.std(0), color=WAM, capsize=1.5, error_kw={"lw": 0.6}, label="pico-WAM")
     ax_c.set_xticks(x)
     ax_c.set_xticklabels(names, rotation=60, fontsize=6)
     ax_c.set_ylim(0, 0.68)
@@ -391,7 +391,7 @@ def fig_data_and_state(exps):
 
     ax = axes[0]
     xs = np.array([n for n, _ in pts])
-    for off, key, color, label in [(0.96, "wam_test", WAM, "picoWAM"), (1.04, "vla_test", VLA, "VLA baseline")]:
+    for off, key, color, label in [(0.96, "wam_test", WAM, "pico-WAM"), (1.04, "vla_test", VLA, "VLA baseline")]:
         vals = [per_seed(exps[name], lambda s, key=key: 100 * s[key]["success_rate"]) for _, name in pts]
         ax.errorbar(xs * off, [v.mean() for v in vals], yerr=[v.std() for v in vals], color=color, marker="o", ms=3.5,
                     capsize=2, lw=1.1, label=label)
@@ -410,7 +410,7 @@ def fig_data_and_state(exps):
     ax = axes[1]
     groups = [("baseline", "state + image"), ("image-only", "image only")]
     xpos = np.arange(len(groups))
-    for off, key, color, label in [(-0.18, "wam_test", WAM, "picoWAM"), (0.18, "vla_test", VLA, "VLA baseline")]:
+    for off, key, color, label in [(-0.18, "wam_test", WAM, "pico-WAM"), (0.18, "vla_test", VLA, "VLA baseline")]:
         vals = [per_seed(exps[g], lambda s, key=key: 100 * s[key]["success_rate"]) for g, _ in groups]
         ax.bar(xpos + off, [v.mean() for v in vals], 0.34, color=color, label=label)
         for xp, v in zip(xpos, vals):
@@ -437,7 +437,7 @@ def fig_policy(exps):
     ax = axes[0]
     pts = [(25, "episodes-25"), (50, "episodes-50"), (100, "episodes-100"), (400, "baseline")]
     xs = np.array([n for n, _ in pts])
-    for off, key, color, label in [(0.95, "wam_test", WAM, "picoWAM"), (1.05, "vla_test", VLA, "VLA baseline")]:
+    for off, key, color, label in [(0.95, "wam_test", WAM, "pico-WAM"), (1.05, "vla_test", VLA, "VLA baseline")]:
         vals = [per_seed(exps[name], lambda s, key=key: 100 * s[key]["success_rate"]) for _, name in pts]
         ax.errorbar(xs * off, [v.mean() for v in vals], yerr=[v.std() for v in vals], color=color, marker="o",
                     ms=3, capsize=2, lw=1.1, label=label)
@@ -456,7 +456,7 @@ def fig_policy(exps):
     ax = axes[1]
     groups = [("baseline", "state +\nimage"), ("image-only", "image\nonly")]
     xpos = np.arange(len(groups))
-    for off, key, color, label in [(-0.18, "wam_test", WAM, "picoWAM"), (0.18, "vla_test", VLA, "VLA")]:
+    for off, key, color, label in [(-0.18, "wam_test", WAM, "pico-WAM"), (0.18, "vla_test", VLA, "VLA")]:
         vals = [per_seed(exps[g], lambda s, key=key: 100 * s[key]["success_rate"]) for g, _ in groups]
         ax.bar(xpos + off, [v.mean() for v in vals], 0.34, color=color, label=label)
         for xp, v in zip(xpos, vals):
