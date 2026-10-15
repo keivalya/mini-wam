@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=mwam-supervision
+#SBATCH --job-name=pwam-supervision
 #SBATCH --partition=gpu-short
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=2
@@ -8,10 +8,10 @@
 #SBATCH --array=0-4%2
 #SBATCH --output=logs/supervision-%A_%a.log
 set -euo pipefail
-cd /scratch/pandya.kei/mini-wam-research-20261014
+cd "${SLURM_SUBMIT_DIR}"
 export OMP_NUM_THREADS=2
 export MKL_NUM_THREADS=2
-PY=/home/pandya.kei/.cache/mini-wam/venv-944118425/bin/python
+PY="${PICO_WAM_PY:-python}"
 SEED=${SLURM_ARRAY_TASK_ID}
 RUN="runs/job-${SLURM_ARRAY_JOB_ID}/seed-${SEED}"
 mkdir -p "$RUN"
