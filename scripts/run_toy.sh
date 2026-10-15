@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end mini-WAM experiment on the toy world, repeated over several seeds:
+# End-to-end picoWAM experiment on the toy world, repeated over several seeds:
 #   for each seed: collect -> train WAM -> train VLA baseline -> evaluate -> closed-loop test
 #   then: visualize seed 0, and summarize mean ± std over seeds
 #
@@ -24,12 +24,12 @@ DEVICE="${DEVICE:-auto}"
 # ========================================================================
 
 # ---- environment: one venv per package list, reused across runs
-#      (set MINI_WAM_PY=/path/to/python to use an existing environment instead)
+#      (set PICO_WAM_PY=/path/to/python to use an existing environment instead)
 PKGS='torch numpy opencv-python-headless imageio imageio[ffmpeg] matplotlib'
 PY="${PYTHON:-python3}"
 
-if command -v module >/dev/null 2>&1 && [ -n "${MINI_WAM_MODULES:-}" ]; then
-  module load $MINI_WAM_MODULES
+if command -v module >/dev/null 2>&1 && [ -n "${PICO_WAM_MODULES:-}" ]; then
+  module load $PICO_WAM_MODULES
 fi
 
 # CPU-only torch wheels unless this machine has an NVIDIA GPU (much smaller install)
@@ -39,8 +39,8 @@ else
   TORCH_INDEX="https://download.pytorch.org/whl/cpu"
 fi
 
-if [ -n "${MINI_WAM_PY:-}" ]; then
-  PYV="$MINI_WAM_PY"
+if [ -n "${PICO_WAM_PY:-}" ]; then
+  PYV="$PICO_WAM_PY"
 else
   if command -v uv >/dev/null 2>&1; then
     PY_SPEC="${UV_PYTHON_VERSION:-3.11}"      # uv fetches this Python if needed
@@ -48,7 +48,7 @@ else
     PY_SPEC="$($PY --version 2>&1)"
   fi
   PKG_HASH="$(echo "$PKGS $PY_SPEC $TORCH_INDEX" | cksum | cut -d' ' -f1)"
-  VENV="$HOME/.cache/mini-wam/venv-$PKG_HASH"
+  VENV="$HOME/.cache/pico-wam/venv-$PKG_HASH"
   # .ready is written only after a complete install, so an interrupted
   # install is rebuilt instead of silently reused
   if [ ! -f "$VENV/.ready" ]; then
