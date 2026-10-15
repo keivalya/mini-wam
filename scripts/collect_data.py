@@ -6,7 +6,7 @@
 VLA data:
     observation_t -> action_t
 
-picoWAM data:
+pico-WAM data:
     observation_t -> action_t + observation_t+1
 
 Saved .npz keys:
