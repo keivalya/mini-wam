@@ -1,4 +1,4 @@
-"""Action heads for picoWAM.
+"""Action heads for pico-WAM.
 
 Every head maps the fused latent world state z_t to an action a_t and
 exposes the same two methods:
