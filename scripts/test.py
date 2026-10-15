@@ -1,4 +1,4 @@
-"""Test a picoWAM (or VLA baseline) policy in closed loop (toy env or Meta-World MT1).
+"""Test a pico-WAM (or VLA baseline) policy in closed loop (toy env or Meta-World MT1).
 
 With --save-video, every frame of a WAM rollout shows what the model sees
 and what it is thinking:
@@ -23,7 +23,7 @@ from utils.tokenizer import SimpleTokenizer
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Test a picoWAM policy in closed loop")
+    parser = argparse.ArgumentParser(description="Test a pico-WAM policy in closed loop")
 
     parser.add_argument("--checkpoint", type=str, default="checkpoints/model.pt")
     parser.add_argument("--env", type=str, default=None, choices=["toy", "metaworld"],
