@@ -426,9 +426,199 @@ def fig_data_and_state(exps):
     finish(fig, "fig-data-and-state")
 
 
+# --------------------------------------------------- policy outcomes
+
+
+def fig_policy(exps):
+    """(a) data scaling, (b) state vs pixel input, (c) matched-supervision pilot."""
+    pilot = json.load(open(os.path.join(RESULTS, "supervision-pilot", "summary.json")))
+    fig, axes = fs.figure_grid(1, 3, width=W, ratio=0.38, gridspec_kw={"width_ratios": [1.25, 0.9, 1.0]})
+
+    ax = axes[0]
+    pts = [(25, "episodes-25"), (50, "episodes-50"), (100, "episodes-100"), (400, "baseline")]
+    xs = np.array([n for n, _ in pts])
+    for off, key, color, label in [(0.95, "wam_test", WAM, "mini-WAM"), (1.05, "vla_test", VLA, "VLA baseline")]:
+        vals = [per_seed(exps[name], lambda s, key=key: 100 * s[key]["success_rate"]) for _, name in pts]
+        ax.errorbar(xs * off, [v.mean() for v in vals], yerr=[v.std() for v in vals], color=color, marker="o",
+                    ms=3, capsize=2, lw=1.1, label=label)
+        m = per_seed(exps["episodes-25-matched"], lambda s, key=key: 100 * s[key]["success_rate"])
+        ax.errorbar([25 * off], [m.mean()], yerr=[m.std()], color=color, marker="o", mfc="white", ms=3.5, capsize=2, ls="none")
+    ax.plot([], [], color="0.3", marker="o", mfc="white", ls="none", label="25 episodes, matched updates")
+    ax.set_xscale("log")
+    ax.set_xticks(xs)
+    ax.set_xticklabels([str(x) for x in xs])
+    ax.minorticks_off()
+    ax.set_ylim(70, 102)
+    ax.set_xlabel("demonstration episodes per run")
+    ax.set_ylabel("closed-loop success (%)")
+    ax.legend(loc="lower right", fontsize=5.5)
+
+    ax = axes[1]
+    groups = [("baseline", "state +\nimage"), ("image-only", "image\nonly")]
+    xpos = np.arange(len(groups))
+    for off, key, color, label in [(-0.18, "wam_test", WAM, "mini-WAM"), (0.18, "vla_test", VLA, "VLA")]:
+        vals = [per_seed(exps[g], lambda s, key=key: 100 * s[key]["success_rate"]) for g, _ in groups]
+        ax.bar(xpos + off, [v.mean() for v in vals], 0.34, color=color, label=label)
+        for xp, v in zip(xpos, vals):
+            ax.scatter(np.full(len(v), xp + off), v, s=6, color="black", zorder=3, lw=0)
+    ax.set_xticks(xpos)
+    ax.set_xticklabels([l for _, l in groups])
+    ax.set_ylim(0, 125)
+    ax.set_yticks([0, 25, 50, 75, 100])
+    ax.set_ylabel("closed-loop success (%)")
+    ax.legend(loc="upper center", ncol=2, fontsize=5.5)
+
+    ax = axes[2]
+    conds = [("bc", "actions\nonly"), ("current", "+ current\nstate"), ("future", "+ future\nstate")]
+    rows = pilot["rows"]
+    x = np.arange(len(conds))
+    for r in rows:  # one line per training run, paired across conditions
+        ax.plot(x, [100 * r[c] for c, _ in conds], color=REF, lw=0.6, alpha=0.7, marker="o", ms=2)
+    means = [100 * pilot["summary"][c]["mean"] for c, _ in conds]
+    sds = [100 * pilot["summary"][c]["sample_sd"] for c, _ in conds]
+    ax.errorbar(x, means, yerr=sds, color=WAM, marker="s", ms=3.5, capsize=2, lw=1.4, label="mean ± SD")
+    ax.set_xticks(x)
+    ax.set_xticklabels([l for _, l in conds], fontsize=6)
+    ax.set_xlim(-0.3, 2.3)
+    ax.set_ylim(0, 45)
+    ax.set_ylabel("pixel-input success (%)")
+    ax.legend(loc="lower right", fontsize=5.5)
+
+    fs.panel_labels(axes)
+    finish(fig, "fig-policy")
+
+
+# --------------------------------------------------- efficiency
+
+
+def fig_efficiency():
+    d = json.load(open(os.path.join(RESULTS, "efficiency", "efficiency.json")))
+    P = d["parameters"]
+    fig, axes = fs.figure_grid(1, 3, width=W, ratio=0.36, gridspec_kw={"width_ratios": [1.25, 0.85, 1.0]})
+
+    # (a) parameters per module, stacked
+    ax = axes[0]
+    groups = [("encoders + fusion", ["img_encoder", "txt_encoder", "state_encoder", "fusion"], "#BBBBBB"),
+              ("action head", ["policy_head"], VLA),
+              ("dynamics + readout", ["dynamics", "state_readout"], WAM),
+              ("image decoder", ["image_decoder"], fs.PALETTE["orange"])]
+    models = [("VLA", P["vla"]), ("WAM,\nstates only", {k: v for k, v in P["wam"].items() if k != "image_decoder"}), ("WAM", P["wam"])]
+    y = np.arange(len(models))[::-1]
+    for yi, (name, parts) in zip(y, models):
+        left = 0.0
+        for gname, keys, color in groups:
+            w = sum(parts.get(k, 0) for k in keys) / 1e3
+            ax.barh(yi, w, left=left, color=color, height=0.6, label=gname if yi == y[-1] else None)
+            left += w
+    ax.set_yticks(y)
+    ax.set_yticklabels([m for m, _ in models], fontsize=6.5)
+    ax.set_xlabel("parameters (thousands)")
+    ax.grid(axis="y", visible=False)
+    ax.grid(axis="x", visible=True)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.45, -0.32), ncol=2, fontsize=5.5)
+
+    # (b) one optimizer step
+    ax = axes[1]
+    T = d["train_step_ms"]
+    names = [("VLA", "vla", VLA), ("WAM,\nstates", "wam_state_only", WAM), ("WAM", "wam", fs.PALETTE["orange"])]
+    ax.bar(range(3), [T[k] for _, k, _ in names], color=[c for _, _, c in names], width=0.6)
+    ax.set_yscale("log")
+    ax.set_xticks(range(3))
+    ax.set_xticklabels([n for n, _, _ in names], fontsize=6.5)
+    ax.set_ylabel("training step (ms, batch 64)")
+
+    # (c) imagination cost vs horizon
+    ax = axes[2]
+    L = d["latency_ms"]
+    ks = [1, 5, 10, 20]
+    ax.plot(ks, [L[f"imagine_{k}_states"] for k in ks], color=WAM, marker="o", ms=3, label="latent + state readout")
+    ax.plot(ks, [L[f"imagine_{k}_states_and_images"] for k in ks], color=fs.PALETTE["orange"], marker="s", ms=3, label="+ decode every image")
+    ax.axhline(L["act_wam"], color=REF, ls="--", lw=0.8, label="one policy action")
+    ax.set_yscale("log")
+    ax.set_xticks(ks)
+    ax.set_xlabel("imagined steps $k$")
+    ax.set_ylabel("latency (ms, batch 1)")
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.3), ncol=1, fontsize=5.5)
+
+    fs.panel_labels(axes)
+    finish(fig, "fig-efficiency")
+
+
+# --------------------------------------------------- toy world
+
+
+def fig_toy_world():
+    """(a) rendered frames of one expert episode, (b) one training episode with exploration bursts."""
+    sys.path.insert(0, os.path.join(HERE, "..", ".."))
+    from envs.toy_point_env import ToyPointEnv
+
+    env = ToyPointEnv(seed=71)
+    img, state, info = env.reset(seed=71, target="blue")
+    frames, traj = [img], [state[:2]]
+    for _ in range(40):
+        img, state, _, done, _ = env.step(env.expert_action(noise=0.0))
+        frames.append(img)
+        traj.append(state[:2])
+        if done:
+            break
+    T = len(frames) - 1
+    picks = np.unique(np.linspace(0, T, 4).round().astype(int))
+
+    # a training episode as collected by scripts/collect_data.py: bursts of 1-3 random actions, p = 0.3
+    rng = np.random.default_rng(3)
+    env2 = ToyPointEnv(seed=5)
+    env2.reset(seed=5, target="green")
+    acts, expert, burst = [], [], 0
+    for _ in range(80):
+        if burst == 0 and rng.random() < 0.3:
+            burst = int(rng.integers(1, 4))
+        if burst > 0:
+            a = rng.uniform(-1, 1, 2)
+            burst -= 1
+            expert.append(False)
+        else:
+            a = env2.expert_action(noise=0.1)
+            expert.append(True)
+        acts.append(np.clip(a, -1, 1))
+        _, _, _, done, _ = env2.step(a)
+        if done:
+            break
+    acts = np.asarray(acts)
+
+    fig = plt.figure(figsize=(W, 0.26 * W), layout="constrained")
+    gs = fig.add_gridspec(1, 2, width_ratios=[2.6, 1.4])
+    strip = gs[0].subgridspec(1, len(picks), wspace=0.04)
+    first = None
+    for c, t in enumerate(picks):
+        a = fig.add_subplot(strip[0, c])
+        a.imshow(frames[t], interpolation="nearest")
+        image_axis(a)
+        a.text(0.5, 1.03, f"$t={t}$", transform=a.transAxes, ha="center", va="bottom", fontsize=6.5)
+        first = first or a
+    first.text(0.03, 0.04, '"go to the blue goal"', transform=first.transAxes, fontsize=5.5, color="0.2",
+               bbox={"boxstyle": "square,pad=0.15", "fc": "white", "ec": "none", "alpha": 0.85})
+
+    ax = fig.add_subplot(gs[1])
+    t = np.arange(len(acts))
+    for i, e in enumerate(expert):
+        if not e:
+            ax.axvspan(i - 0.5, i + 0.5, color=WAM, alpha=0.18, lw=0)
+    ax.plot(t, acts[:, 0], color=TRUE, lw=1.0, label="$a_x$")
+    ax.plot(t, acts[:, 1], color=VLA, lw=1.0, ls="--", label="$a_y$")
+    ax.set_ylim(-1.1, 1.1)
+    ax.set_xlabel("timestep")
+    ax.set_ylabel("action")
+    ax.legend([Line2D([], [], color=TRUE, lw=1.0), Line2D([], [], color=VLA, lw=1.0, ls="--"),
+               plt.Rectangle((0, 0), 1, 1, color=WAM, alpha=0.18)], ["$a_x$", "$a_y$", "random burst"],
+              loc="upper center", bbox_to_anchor=(0.5, -0.38), ncol=3, fontsize=5.5)
+
+    fs.panel_labels([first, ax], pad=7.0)
+    finish(fig, "fig-toy-world")
+
+
 def main():
     names = [os.path.basename(p) for p in sorted(glob.glob(os.path.join(RESULTS, "*")))
-             if os.path.isdir(p) and os.path.basename(p) != "figure-data"]
+             if os.path.isdir(p) and os.path.basename(p) not in ("figure-data", "efficiency", "research-audit", "supervision-pilot")]
     exps = {n: load_experiment(n) for n in names}
     fig_imagination_quality(exps["baseline"])
     fig_episode_strip()
@@ -439,6 +629,9 @@ def main():
     fig_latent_map()
     fig_keypoints()
     fig_data_and_state(exps)
+    fig_policy(exps)
+    fig_efficiency()
+    fig_toy_world()
 
 
 if __name__ == "__main__":
