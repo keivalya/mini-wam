@@ -3,7 +3,7 @@
 VLA:
     image_t + text + state_t -> action_t
 
-mini-WAM:
+picoWAM:
     image_t + text + state_t -> action_t + state_t+1 + image_t+1
 
 How the pieces fit together:
@@ -43,7 +43,7 @@ from .dynamics_head import LatentDynamicsMLP, StateReadout
 from .image_decoder import ImageDecoder
 
 
-class MiniWAMPolicy(nn.Module):
+class PicoWAMPolicy(nn.Module):
     def __init__(
         self,
         vocab_size,
