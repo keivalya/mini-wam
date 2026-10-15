@@ -1,4 +1,4 @@
-"""Offline evaluation of a trained picoWAM world model on held-out episodes.
+"""Offline evaluation of a trained pico-WAM world model on held-out episodes.
 
 Questions this answers (all on episodes the model never trained on):
 
