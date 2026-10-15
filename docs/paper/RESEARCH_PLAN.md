@@ -1,4 +1,4 @@
-# picoWAM: research assessment and execution plan
+# pico-WAM: research assessment and execution plan
 
 Reviewed October 14, 2026 (America/New_York). This is a research decision document, not a claim of publication readiness.
 
@@ -33,7 +33,7 @@ The best possible research direction is **separating the benefit of privileged s
 Read these full papers and reproduce the relevant baseline before deciding on a new loss:
 
 - [AD-WM, Qiu et al., 2026](https://arxiv.org/abs/2609.30264): action-recovery regularization and counterfactual MPC are directly relevant. A proposal consisting only of inverse-dynamics supervision or action ranking is at high risk of duplicating this work.
-- [MiniWAM, Chen et al., 2026](https://arxiv.org/abs/2610.12194): compact predictive targets and privileged transition supervision. This is an unrelated project; this repository was renamed from mini-WAM to picoWAM to avoid confusion with it.
+- [MiniWAM, Chen et al., 2026](https://arxiv.org/abs/2610.12194): compact predictive targets and privileged transition supervision.
 - [TD-MPC2](https://arxiv.org/abs/2310.16828): strong latent-model/planning reference, not a plug-in apples-to-apples comparator unless its training regime and budgets are aligned.
 - [Dreamer](https://arxiv.org/abs/1912.01603): behavior learned through latent imagination; unlike the current reactive policy.
 - [Causal Confusion in Imitation Learning](https://arxiv.org/abs/1905.11979): behavior-policy correlations and intervention-based reasoning.
@@ -94,7 +94,7 @@ Record data collection cost, task versions, camera calibration, success definiti
 
 Host: `login.explorer.northeastern.edu`, user `pandya.kei`.
 
-Isolated directory: `/scratch/pandya.kei/mini-wam-research-20261014`.
+Isolated directory: a fresh checkout under `/scratch/pandya.kei/`, submitted from its root.
 
 Launcher: `scripts/hpc/supervision_pilot.sbatch`. Five seeds, 200 collected episodes/seed, 15 epochs/condition, 100 paired evaluation episodes/seed, three conditions. GPU-short, one GPU/job, at most two jobs concurrently, 12 GB host RAM, 45-minute wall-time cap/job. This caps the allocation at 3.75 GPU-hours if every task reaches its limit; actual compute is measured in the outputs. No existing jobs or remote projects are modified.
 
@@ -120,4 +120,4 @@ The 10–12-page requirement is treated as the entire working PDF, including ref
 
 ## Submission decision
 
-Do not submit based on writing quality or additional attractive figures. Proceed only when (1) the closest-paper comparison identifies a real distinction, (2) the key mechanism survives supervision/history controls, (3) gains or negative findings replicate with uncertainty estimates, (4) robot relevance is demonstrated, and (5) artifacts reproduce the claims. Otherwise keep picoWAM as a useful diagnostic/educational project while revising the research question.
+Do not submit based on writing quality or additional attractive figures. Proceed only when (1) the closest-paper comparison identifies a real distinction, (2) the key mechanism survives supervision/history controls, (3) gains or negative findings replicate with uncertainty estimates, (4) robot relevance is demonstrated, and (5) artifacts reproduce the claims. Otherwise keep pico-WAM as a useful diagnostic/educational project while revising the research question.
