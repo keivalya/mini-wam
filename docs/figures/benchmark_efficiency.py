@@ -1,4 +1,4 @@
-"""Measure where picoWAM spends parameters and time.
+"""Measure where pico-WAM spends parameters and time.
 
 Uses one trained baseline checkpoint pair (wam.pt, vla.pt, toy.npz from
 scripts/run_toy.sh) and writes docs/results/efficiency/efficiency.json:
