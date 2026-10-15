@@ -43,7 +43,7 @@ Additionally, I provide scripts:
 - [scripts/evaluate.py](scripts/evaluate.py) measures how well the WAM imagines held-out futures, including counterfactual "what if" actions
 - [scripts/visualize_rollout.py](scripts/visualize_rollout.py) shows what the world model believes (imagination strips, latent maps, what-if plots, keypoints)
 - [scripts/test.py](scripts/test.py) tests the policy in sim and saves "mind's eye" videos
-- [scripts/run_toy.sh](scripts/run_toy.sh) runs the full pipeline over three seeds
+- [scripts/run_toy.sh](scripts/run_toy.sh) runs the full pipeline over three independent runs
 
 
 # Video
@@ -107,7 +107,7 @@ Train a VLA baseline (same encoders, no world model) on the same data with `--mo
 
 ## Test your model in sim
 
-Run the trained WAM in the toy world on unseen seeds. With `--save-video`, every frame shows the real observation next to what the model believes now and what it expects a few steps ahead.
+Run the trained WAM in the toy world on unseen episodes. With `--save-video`, every frame shows the real observation next to what the model believes now and what it expects a few steps ahead.
 
 ```
 python -m scripts.test \
@@ -133,7 +133,7 @@ The [revised paper](docs/paper/mini-wam-paper.pdf) distinguishes archived neural
 
 The original experiment launcher remains available as `scripts/run_toy.sh`. **It deletes the root `results/` directory when starting**, so run it only in an isolated checkout. Original training datasets and checkpoints are not included in the local archive.
 
-Run the fresh five-seed dynamics audit with:
+Run the fresh five-run dynamics audit with:
 
 ```sh
 python3 scripts/research_audit.py --seeds 5 --output docs/results/research-audit
