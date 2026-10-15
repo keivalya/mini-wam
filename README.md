@@ -22,7 +22,7 @@ This project intentionally keeps the codebase small (~700 LOC for the core model
 
 > [!TIP]
 > I recommend reading the following to get started with the mini-WAM implementation.
-> - mini-WAM: Building a World Action Model from Scratch — [PDF](docs/paper/mini-wam-paper.pdf) · [Markdown](docs/mini-wam-paper.md) · [LaTeX source](docs/paper/mini-wam-paper.tex)
+> - Prediction Is Not Yet Control: An Empirical Audit of a Small World–Action Model — [PDF](docs/paper/mini-wam-paper.pdf) · [LaTeX source](docs/paper/mini-wam-paper.tex) · [Research plan](docs/paper/RESEARCH_PLAN.md)
 > - Blog: Building a World Action Model from scratch (Basics) — **TBD**
 > - Blog: From VLAs to WAMs (Math, Code, and Intuition) — **TBD**
 
@@ -127,18 +127,19 @@ python -m scripts.evaluate --checkpoint checkpoints/wam.pt
 python -m scripts.visualize_rollout --checkpoint checkpoints/wam.pt --video
 ```
 
-## Reproduce the paper
+## Research evidence and reproduction
 
-Each experiment in [the paper](docs/mini-wam-paper.md) is `scripts/run_toy.sh` with one line of its config block changed. It runs collection, WAM + VLA training, evaluation and closed-loop tests over three seeds.
+The [revised paper](docs/paper/mini-wam-paper.pdf) distinguishes archived neural results from fresh diagnostics. The [research plan](docs/paper/RESEARCH_PLAN.md) reviews novelty, confounds, and top-tier venue requirements.
 
+The original experiment launcher remains available as `scripts/run_toy.sh`. **It deletes the root `results/` directory when starting**, so run it only in an isolated checkout. Original training datasets and checkpoints are not included in the local archive.
+
+Run the fresh five-seed dynamics audit with:
+
+```sh
+python3 scripts/research_audit.py --seeds 5 --output docs/results/research-audit
 ```
-bash scripts/run_toy.sh
-```
 
-A few things the paper found on the toy world:
-- the world model imagines 15 steps ahead with ~80× less state error than assuming nothing changes
-- trained on expert demos alone, it predicts what happened *better* but understands other actions **15× worse**
-- from pixels alone (no state input), world modeling more than doubles closed-loop success (80% vs. 36%)
+The [audit protocol and results](docs/results/research-audit/README.md) show why persistence alone is insufficient as a baseline: a structured affine predictor fits this toy's dynamics to numerical precision, including from deterministic expert data. The archived pixel-input policy gain remains promising but is confounded by privileged state supervision. A matched supervision pilot is implemented in `scripts/supervision_ablation.py`, with an Explorer launcher in `scripts/hpc/`.
 
 ## Inference (coming soon)
 

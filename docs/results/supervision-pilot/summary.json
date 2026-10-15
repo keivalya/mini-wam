@@ -1,0 +1,83 @@
+{
+  "description": "Exploratory pilot; no significance or convergence claim. Success means/sample SD over training seeds.",
+  "n_seeds": 5,
+  "rows": [
+    {
+      "seed": 0,
+      "bc": 0.21,
+      "current": 0.26,
+      "future": 0.33
+    },
+    {
+      "seed": 1,
+      "bc": 0.18,
+      "current": 0.24,
+      "future": 0.33
+    },
+    {
+      "seed": 2,
+      "bc": 0.0,
+      "current": 0.26,
+      "future": 0.3
+    },
+    {
+      "seed": 3,
+      "bc": 0.27,
+      "current": 0.38,
+      "future": 0.36
+    },
+    {
+      "seed": 4,
+      "bc": 0.19,
+      "current": 0.28,
+      "future": 0.36
+    }
+  ],
+  "summary": {
+    "bc": {
+      "mean": 0.17,
+      "sample_sd": 0.10124228365658294
+    },
+    "current": {
+      "mean": 0.28400000000000003,
+      "sample_sd": 0.055497747702046435
+    },
+    "future": {
+      "mean": 0.33599999999999997,
+      "sample_sd": 0.02509980079602226
+    },
+    "current-minus-bc": {
+      "mean": 0.11400000000000002,
+      "sample_sd": 0.08502940667792525,
+      "values": [
+        0.05000000000000002,
+        0.06,
+        0.26,
+        0.10999999999999999,
+        0.09000000000000002
+      ]
+    },
+    "future-minus-current": {
+      "mean": 0.05199999999999999,
+      "sample_sd": 0.044384682042344296,
+      "values": [
+        0.07,
+        0.09000000000000002,
+        0.03999999999999998,
+        -0.020000000000000018,
+        0.07999999999999996
+      ]
+    },
+    "future-minus-bc": {
+      "mean": 0.166,
+      "sample_sd": 0.08080841540334768,
+      "values": [
+        0.12000000000000002,
+        0.15000000000000002,
+        0.3,
+        0.08999999999999997,
+        0.16999999999999998
+      ]
+    }
+  }
+}

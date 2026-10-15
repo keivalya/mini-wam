@@ -1,3 +1,5 @@
+> **Archived tutorial draft.** This text is retained for historical context and contains interpretations superseded by the [revised research paper](paper/mini-wam-paper.pdf), especially the hidden-velocity explanation. Use the [LaTeX source](paper/mini-wam-paper.tex) and [research plan](paper/RESEARCH_PLAN.md) for current claims.
+
 # mini-WAM: Building a World Action Model from Scratch
 
 **Keivalya Pandya**, Northeastern University

@@ -1,0 +1,260 @@
+2.14.1+cu126 Tesla V100-SXM2-32GB
+Episode 1/200 finished after 27 steps, success=1
+Episode 2/200 finished after 36 steps, success=1
+Episode 3/200 finished after 51 steps, success=1
+Episode 4/200 finished after 62 steps, success=1
+Episode 5/200 finished after 30 steps, success=1
+Episode 6/200 finished after 23 steps, success=1
+Episode 7/200 finished after 23 steps, success=1
+Episode 8/200 finished after 52 steps, success=1
+Episode 9/200 finished after 77 steps, success=1
+Episode 10/200 finished after 21 steps, success=1
+Episode 11/200 finished after 34 steps, success=1
+Episode 12/200 finished after 29 steps, success=1
+Episode 13/200 finished after 44 steps, success=1
+Episode 14/200 finished after 32 steps, success=1
+Episode 15/200 finished after 20 steps, success=1
+Episode 16/200 finished after 22 steps, success=1
+Episode 17/200 finished after 32 steps, success=1
+Episode 18/200 finished after 33 steps, success=1
+Episode 19/200 finished after 29 steps, success=1
+Episode 20/200 finished after 31 steps, success=1
+Episode 21/200 finished after 37 steps, success=1
+Episode 22/200 finished after 40 steps, success=1
+Episode 23/200 finished after 39 steps, success=1
+Episode 24/200 finished after 35 steps, success=1
+Episode 25/200 finished after 30 steps, success=1
+Episode 26/200 finished after 36 steps, success=1
+Episode 27/200 finished after 43 steps, success=1
+Episode 28/200 finished after 37 steps, success=1
+Episode 29/200 finished after 18 steps, success=1
+Episode 30/200 finished after 56 steps, success=1
+Episode 31/200 finished after 43 steps, success=1
+Episode 32/200 finished after 46 steps, success=1
+Episode 33/200 finished after 46 steps, success=1
+Episode 34/200 finished after 33 steps, success=1
+Episode 35/200 finished after 22 steps, success=1
+Episode 36/200 finished after 38 steps, success=1
+Episode 37/200 finished after 20 steps, success=1
+Episode 38/200 finished after 46 steps, success=1
+Episode 39/200 finished after 22 steps, success=1
+Episode 40/200 finished after 36 steps, success=1
+Episode 41/200 finished after 53 steps, success=1
+Episode 42/200 finished after 38 steps, success=1
+Episode 43/200 finished after 41 steps, success=1
+Episode 44/200 finished after 20 steps, success=1
+Episode 45/200 finished after 52 steps, success=1
+Episode 46/200 finished after 40 steps, success=1
+Episode 47/200 finished after 25 steps, success=1
+Episode 48/200 finished after 42 steps, success=1
+Episode 49/200 finished after 34 steps, success=1
+Episode 50/200 finished after 42 steps, success=1
+Episode 51/200 finished after 31 steps, success=1
+Episode 52/200 finished after 57 steps, success=1
+Episode 53/200 finished after 41 steps, success=1
+Episode 54/200 finished after 27 steps, success=1
+Episode 55/200 finished after 48 steps, success=1
+Episode 56/200 finished after 27 steps, success=1
+Episode 57/200 finished after 73 steps, success=1
+Episode 58/200 finished after 60 steps, success=1
+Episode 59/200 finished after 44 steps, success=1
+Episode 60/200 finished after 39 steps, success=1
+Episode 61/200 finished after 80 steps, success=0
+Episode 62/200 finished after 57 steps, success=1
+Episode 63/200 finished after 58 steps, success=1
+Episode 64/200 finished after 21 steps, success=1
+Episode 65/200 finished after 26 steps, success=1
+Episode 66/200 finished after 40 steps, success=1
+Episode 67/200 finished after 22 steps, success=1
+Episode 68/200 finished after 38 steps, success=1
+Episode 69/200 finished after 69 steps, success=1
+Episode 70/200 finished after 49 steps, success=1
+Episode 71/200 finished after 31 steps, success=1
+Episode 72/200 finished after 21 steps, success=1
+Episode 73/200 finished after 57 steps, success=1
+Episode 74/200 finished after 37 steps, success=1
+Episode 75/200 finished after 30 steps, success=1
+Episode 76/200 finished after 32 steps, success=1
+Episode 77/200 finished after 40 steps, success=1
+Episode 78/200 finished after 35 steps, success=1
+Episode 79/200 finished after 18 steps, success=1
+Episode 80/200 finished after 19 steps, success=1
+Episode 81/200 finished after 27 steps, success=1
+Episode 82/200 finished after 41 steps, success=1
+Episode 83/200 finished after 45 steps, success=1
+Episode 84/200 finished after 54 steps, success=1
+Episode 85/200 finished after 26 steps, success=1
+Episode 86/200 finished after 47 steps, success=1
+Episode 87/200 finished after 29 steps, success=1
+Episode 88/200 finished after 45 steps, success=1
+Episode 89/200 finished after 44 steps, success=1
+Episode 90/200 finished after 36 steps, success=1
+Episode 91/200 finished after 39 steps, success=1
+Episode 92/200 finished after 39 steps, success=1
+Episode 93/200 finished after 41 steps, success=1
+Episode 94/200 finished after 80 steps, success=0
+Episode 95/200 finished after 20 steps, success=1
+Episode 96/200 finished after 34 steps, success=1
+Episode 97/200 finished after 44 steps, success=1
+Episode 98/200 finished after 47 steps, success=1
+Episode 99/200 finished after 56 steps, success=1
+Episode 100/200 finished after 37 steps, success=1
+Episode 101/200 finished after 30 steps, success=1
+Episode 102/200 finished after 35 steps, success=1
+Episode 103/200 finished after 51 steps, success=1
+Episode 104/200 finished after 53 steps, success=1
+Episode 105/200 finished after 45 steps, success=1
+Episode 106/200 finished after 43 steps, success=1
+Episode 107/200 finished after 38 steps, success=1
+Episode 108/200 finished after 37 steps, success=1
+Episode 109/200 finished after 45 steps, success=1
+Episode 110/200 finished after 29 steps, success=1
+Episode 111/200 finished after 27 steps, success=1
+Episode 112/200 finished after 24 steps, success=1
+Episode 113/200 finished after 44 steps, success=1
+Episode 114/200 finished after 28 steps, success=1
+Episode 115/200 finished after 23 steps, success=1
+Episode 116/200 finished after 34 steps, success=1
+Episode 117/200 finished after 38 steps, success=1
+Episode 118/200 finished after 31 steps, success=1
+Episode 119/200 finished after 44 steps, success=1
+Episode 120/200 finished after 37 steps, success=1
+Episode 121/200 finished after 34 steps, success=1
+Episode 122/200 finished after 29 steps, success=1
+Episode 123/200 finished after 32 steps, success=1
+Episode 124/200 finished after 33 steps, success=1
+Episode 125/200 finished after 20 steps, success=1
+Episode 126/200 finished after 33 steps, success=1
+Episode 127/200 finished after 32 steps, success=1
+Episode 128/200 finished after 20 steps, success=1
+Episode 129/200 finished after 26 steps, success=1
+Episode 130/200 finished after 53 steps, success=1
+Episode 131/200 finished after 45 steps, success=1
+Episode 132/200 finished after 28 steps, success=1
+Episode 133/200 finished after 40 steps, success=1
+Episode 134/200 finished after 26 steps, success=1
+Episode 135/200 finished after 17 steps, success=1
+Episode 136/200 finished after 31 steps, success=1
+Episode 137/200 finished after 43 steps, success=1
+Episode 138/200 finished after 70 steps, success=1
+Episode 139/200 finished after 23 steps, success=1
+Episode 140/200 finished after 44 steps, success=1
+Episode 141/200 finished after 27 steps, success=1
+Episode 142/200 finished after 46 steps, success=1
+Episode 143/200 finished after 31 steps, success=1
+Episode 144/200 finished after 46 steps, success=1
+Episode 145/200 finished after 27 steps, success=1
+Episode 146/200 finished after 32 steps, success=1
+Episode 147/200 finished after 40 steps, success=1
+Episode 148/200 finished after 52 steps, success=1
+Episode 149/200 finished after 33 steps, success=1
+Episode 150/200 finished after 42 steps, success=1
+Episode 151/200 finished after 25 steps, success=1
+Episode 152/200 finished after 57 steps, success=1
+Episode 153/200 finished after 46 steps, success=1
+Episode 154/200 finished after 56 steps, success=1
+Episode 155/200 finished after 29 steps, success=1
+Episode 156/200 finished after 42 steps, success=1
+Episode 157/200 finished after 50 steps, success=1
+Episode 158/200 finished after 29 steps, success=1
+Episode 159/200 finished after 34 steps, success=1
+Episode 160/200 finished after 31 steps, success=1
+Episode 161/200 finished after 34 steps, success=1
+Episode 162/200 finished after 23 steps, success=1
+Episode 163/200 finished after 62 steps, success=1
+Episode 164/200 finished after 59 steps, success=1
+Episode 165/200 finished after 27 steps, success=1
+Episode 166/200 finished after 38 steps, success=1
+Episode 167/200 finished after 31 steps, success=1
+Episode 168/200 finished after 31 steps, success=1
+Episode 169/200 finished after 37 steps, success=1
+Episode 170/200 finished after 43 steps, success=1
+Episode 171/200 finished after 59 steps, success=1
+Episode 172/200 finished after 31 steps, success=1
+Episode 173/200 finished after 17 steps, success=1
+Episode 174/200 finished after 54 steps, success=1
+Episode 175/200 finished after 25 steps, success=1
+Episode 176/200 finished after 28 steps, success=1
+Episode 177/200 finished after 27 steps, success=1
+Episode 178/200 finished after 52 steps, success=1
+Episode 179/200 finished after 35 steps, success=1
+Episode 180/200 finished after 54 steps, success=1
+Episode 181/200 finished after 41 steps, success=1
+Episode 182/200 finished after 24 steps, success=1
+Episode 183/200 finished after 66 steps, success=1
+Episode 184/200 finished after 42 steps, success=1
+Episode 185/200 finished after 32 steps, success=1
+Episode 186/200 finished after 18 steps, success=1
+Episode 187/200 finished after 40 steps, success=1
+Episode 188/200 finished after 32 steps, success=1
+Episode 189/200 finished after 39 steps, success=1
+Episode 190/200 finished after 37 steps, success=1
+Episode 191/200 finished after 27 steps, success=1
+Episode 192/200 finished after 29 steps, success=1
+Episode 193/200 finished after 22 steps, success=1
+Episode 194/200 finished after 35 steps, success=1
+Episode 195/200 finished after 43 steps, success=1
+Episode 196/200 finished after 53 steps, success=1
+Episode 197/200 finished after 38 steps, success=1
+Episode 198/200 finished after 47 steps, success=1
+Episode 199/200 finished after 48 steps, success=1
+Episode 200/200 finished after 20 steps, success=1
+
+Saved WAM-compatible dataset to: runs/job-11088783/seed-0/data.npz
+  images:       (7566, 64, 64, 3)
+  states:       (7566, 6)
+  actions:      (7566, 2)
+  next_images:  (7566, 64, 64, 3)
+  next_states:  (7566, 6)
+  text_ids:     (7566, 5)
+  vocab size:   8
+  expert frac:  0.54
+  successes:    198/200
+bc 1 0.26676385670578634
+bc 2 0.26451646612873647
+bc 3 0.26314072055503906
+bc 4 0.2615112361854925
+bc 5 0.2612436527193158
+bc 6 0.25994643051327154
+bc 7 0.2604269377611843
+bc 8 0.26004995596264563
+bc 9 0.26050690220078493
+bc 10 0.26001099568002944
+bc 11 0.25376991439692365
+bc 12 0.22273225235147417
+bc 13 0.18641338921720232
+bc 14 0.175964961424933
+bc 15 0.16663349680858458
+RESULT bc 0.21
+current 1 0.7843856569751244
+current 2 0.7732813091187607
+current 3 0.6682703647205632
+current 4 0.5374273547831414
+current 5 0.5321806754050474
+current 6 0.5017250237957808
+current 7 0.3482875403115513
+current 8 0.30539914919809846
+current 9 0.2867135044636974
+current 10 0.27673052559403527
+current 11 0.26479210357748684
+current 12 0.2610423728302097
+current 13 0.2490144923236739
+current 14 0.242013371679024
+current 15 0.2300420744983753
+RESULT current 0.26
+future 1 1.255670569634804
+future 2 0.9690223882741931
+future 3 0.6611310198956702
+future 4 0.6425170332417599
+future 5 0.5467097556372659
+future 6 0.4037711729518253
+future 7 0.36151426491937805
+future 8 0.3360859206641543
+future 9 0.30926525368579744
+future 10 0.2880343292560459
+future 11 0.27912080923560245
+future 12 0.25991605359196934
+future 13 0.25598734907749865
+future 14 0.2445385146265838
+future 15 0.23271401211409776
+RESULT future 0.33
