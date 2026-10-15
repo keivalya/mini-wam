@@ -3,7 +3,7 @@
 VLA:
     image_t + text + state_t -> action_t
 
-picoWAM:
+pico-WAM:
     image_t + text + state_t -> action_t + state_t+1 + image_t+1
 
 How the pieces fit together:
