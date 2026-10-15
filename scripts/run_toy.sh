@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# End-to-end picoWAM experiment on the toy world, repeated over several seeds:
+# End-to-end pico-WAM experiment on the toy world, repeated over several seeds:
 #   for each seed: collect -> train WAM -> train VLA baseline -> evaluate -> closed-loop test
 #   then: visualize seed 0, and summarize mean ± std over seeds
 #
