@@ -4,7 +4,7 @@ Completed on October 14, 2026, on Northeastern Explorer, Slurm array **11088783*
 
 ## Protocol
 
-Run `scripts/hpc/supervision_pilot.sbatch` from the isolated remote checkout `/scratch/pandya.kei/mini-wam-research-20261014`. The exact script is in the repository. Existing Python environment: `/home/pandya.kei/.cache/mini-wam/venv-944118425/bin/python` (version and package details in each manifest).
+Run `scripts/hpc/supervision_pilot.sbatch` from the root of an isolated checkout on Explorer scratch. The exact script is in the repository. Python environment: the cached project venv built by `scripts/run_toy.sh`, passed in as `PICO_WAM_PY` (version and package details in each manifest).
 
 Each seed collects 200 episodes with the repository burst collector (probability 0.3, maximum 80 steps), takes a 90/10 episode training/validation split, and trains three pixel-input conditions for 15 epochs with Adam, learning rate 0.001, batch size 64. The latent dimension is 128. All conditions use H=5 starts, the same initialization, expert labels, minibatch order and update count. State statistics are fit only on training episodes. Hyperparameters are not selected on the final test episodes. No claim of convergence is made.
 
