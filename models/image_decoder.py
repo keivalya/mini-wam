@@ -1,4 +1,4 @@
-"""Image decoder for picoWAM: latent -> picture of the world.
+"""Image decoder for pico-WAM: latent -> picture of the world.
 
 The decoder turns any latent z (encoded from a real observation, or imagined
 by the latent dynamics) back into an RGB image. Decoding imagined latents is
