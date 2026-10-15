@@ -13,7 +13,7 @@
 \begin{document}
 \maketitle
 \begin{abstract}
-A learned forward model can predict demonstrations accurately without supporting reliable decisions about alternative actions. We examine this distinction in mini-WAM, a compact policy with shared latent dynamics, using a two-dimensional navigation environment whose transitions can be checked directly. Archived experiments across three seeds show low state-prediction error, but no policy improvement when the physical state is supplied. Removing state inputs increases the observed success gap in favor of joint prediction, from zero to 44.3 percentage points, although privileged state supervision and unequal training windows prevent a clean attribution to dynamics learning. A fresh five-seed supervision pilot obtains 17.0\% success with behavioral cloning, 28.4\% with current-state supervision, and 33.6\% with additional future-state prediction. Image predictions also perform worse than copying the current frame. A fresh five-seed system-identification audit finds that an action-conditioned affine model fits the toy dynamics to numerical precision, even with deterministic expert data. This result narrows the interpretation of the neural model's counterfactual failures: they are not an unavoidable property of this environment or its demonstrations. We separate predictive accuracy, observation sufficiency, and control utility, and identify the comparisons needed before claiming that learned world models improve decision-making.
+A learned forward model can predict demonstrations accurately without supporting reliable decisions about alternative actions. We examine this distinction in mini-WAM, a compact policy with shared latent dynamics, using a two-dimensional navigation environment whose transitions can be checked directly. Archived experiments across three independent runs show low state-prediction error, but no policy improvement when the physical state is supplied. Removing state inputs increases the observed success gap in favor of joint prediction, from zero to 44.3 percentage points, although privileged state supervision and unequal training windows prevent a clean attribution to dynamics learning. A fresh five-run supervision pilot obtains 17.0\% success with behavioral cloning, 28.4\% with current-state supervision, and 33.6\% with additional future-state prediction. Image predictions also perform worse than copying the current frame. A fresh five-run system-identification audit finds that an action-conditioned affine model fits the toy dynamics to numerical precision, even with deterministic expert data. This result narrows the interpretation of the neural model's counterfactual failures: they are not an unavoidable property of this environment or its demonstrations. We separate predictive accuracy, observation sufficiency, and control utility, and identify the comparisons needed before claiming that learned world models improve decision-making.
 \end{abstract}
 
 \section{Introduction}
@@ -45,7 +45,7 @@ The agent moves in the unit square. Each episode contains a blue goal and a gree
 \begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{\figpath/research-environment.pdf}
-\caption{Actual simulator frames from a deterministic expert rollout, reset seed 71. The instruction selects the blue square; the green square remains a distractor. Positions and colors are rendered by the environment, without illustrative replacements. Velocity is not drawn. These frames describe the task, not a learned policy's performance.}
+\caption{Actual simulator frames from a deterministic expert rollout. The instruction selects the blue square; the green square remains a distractor. Positions and colors are rendered by the environment, without illustrative replacements. Velocity is not drawn. These frames describe the task, not a learned policy's performance.}
 \label{fig:env}
 \end{figure}
 
@@ -98,7 +98,7 @@ At deployment, both policies encode the current observation and emit an action. 
 
 \section{Evidence and evaluation protocol}
 \label{sec:protocol}
-We distinguish two sources of evidence. The archived study consists of committed per-seed JSON metrics and exported arrays used for figures. Its standard configuration uses 400 episodes, a 90/10 episode split, three seeds, 15 training epochs, and 100 closed-loop evaluation episodes per seed. The initial audit checkout contains neither the original training datasets nor checkpoints. The archived numbers can be reaggregated, but that does not independently reproduce the training runs. Fresh simulator and affine-baseline experiments are described separately in Section~\ref{sec:audit}.
+We distinguish two sources of evidence. The archived study consists of committed per-run JSON metrics and exported arrays used for figures. Its standard configuration uses 400 episodes, a 90/10 episode split, three independent training runs, 15 training epochs, and 100 closed-loop evaluation episodes per run. The initial audit checkout contains neither the original training datasets nor checkpoints. The archived numbers can be reaggregated, but that does not independently reproduce the training runs. Fresh simulator and affine-baseline experiments are described separately in Section~\ref{sec:audit}.
 
 Offline neural evaluation rolls the latent forward from each valid start in a held-out episode, using the recorded actions without re-encoding future observations. At horizon $k$, state error is
 \begin{equation}
@@ -109,7 +109,7 @@ where $\sigma_j$ is the training-set standard deviation. Factual evaluation uses
 
 For counterfactual evaluation, the simulator branches from held-out states under sampled random action sequences. The learned prediction is compared with that branch, and a zero-action simulator trajectory supplies a reference. This reference has access to the true initial state and dynamics; it tests the cost of disregarding the candidate action, not the best achievable learned predictor. The factual copy baseline instead holds the current state or image fixed.
 
-Reported archived spreads are population standard deviations across three training seeds, matching the saved aggregation code. They are descriptive spreads, not confidence intervals. Overlapping windows from an episode are correlated, and the number of valid starts decreases with horizon. Treating all windows as independent replications would substantially overstate precision. The held-out episodes are also used for validation logging, so these offline measurements are not an untouched final test set.
+Reported archived spreads are population standard deviations across three training runs, matching the saved aggregation code. They are descriptive spreads, not confidence intervals. Overlapping windows from an episode are correlated, and the number of valid starts decreases with horizon. Treating all windows as independent replications would substantially overstate precision. The held-out episodes are also used for validation logging, so these offline measurements are not an untouched final test set.
 
 There are further comparison limits. WAM training uses horizon-length windows, excluding the final $H-1$ starts of each episode; behavioral cloning uses one-step windows. Thus the models do not see identical sets of supervised policy starts. Changing exploration also changes trajectory distributions, termination times, and normalization scales. A comparison between exploration conditions is suggestive, but does not isolate the effect of action diversity while holding everything else fixed.
 
@@ -123,7 +123,7 @@ The result also includes two static goal coordinates, which are directly supplie
 \begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{\figpath/research-coverage.pdf}
-\caption{Archived neural prediction errors, means and population standard deviations over three seeds. Expert-only data gives lower long-horizon factual error but higher error under random counterfactual actions. The two panels use different state dimensions; exploration conditions also have different trajectory distributions and normalization statistics. The curves demonstrate an evaluation gap, not a controlled causal estimate of exploration's benefit.}
+\caption{Archived neural prediction errors, means and population standard deviations over three runs. Expert-only data gives lower long-horizon factual error but higher error under random counterfactual actions. The two panels use different state dimensions; exploration conditions also have different trajectory distributions and normalization statistics. The curves demonstrate an evaluation gap, not a controlled causal estimate of exploration's benefit.}
 \label{fig:coverage}
 \end{figure}
 
@@ -145,17 +145,17 @@ No latent loss & .00164 & .00958 & .00698\\
 No image loss & .00203 & .00743 & .00779\\
 \bottomrule
 \end{tabular}
-\caption{Archived mean state NMSE across three seeds. Factual errors average six dimensions; counterfactual errors average four. The table describes this configuration sweep, without significance or equivalence claims.}
+\caption{Archived mean state NMSE across three runs. Factual errors average six dimensions; counterfactual errors average four. The table describes this configuration sweep, without significance or equivalence claims.}
 \label{tab:ablation}
 \end{table}
 
-Ten-step training reduces the observed 15-step error while increasing one-step error (Table~\ref{tab:ablation}). Removing latent consistency increases the mean long-horizon factual error, but the counterfactual mean changes little. Removing image loss gives a similar mean to the standard condition, with a wider across-seed spread at horizon 15: $0.00211$ versus $0.00038$. Three seeds do not establish equivalence, and these measurements do not prove that either loss is unnecessary in a visual task. Here the encoder already receives the physical state.
+Ten-step training reduces the observed 15-step error while increasing one-step error (Table~\ref{tab:ablation}). Removing latent consistency increases the mean long-horizon factual error, but the counterfactual mean changes little. Removing image loss gives a similar mean to the standard condition, with a wider across-run spread at horizon 15: $0.00211$ versus $0.00038$. Three runs do not establish equivalence, and these measurements do not prove that either loss is unnecessary in a visual task. Here the encoder already receives the physical state.
 
 \subsection{Decoded images reveal a different failure}
 \begin{figure}[t]
 \centering
 \includegraphics[width=\linewidth]{\figpath/research-observations.pdf}
-\caption{Archived seed-0 episode: observed frames, reconstructions from each current observation, and open-loop predictions conditioned on recorded actions. Rows use the same saved timestamps. The predicted row starts from one encoded observation; it does not receive the later frames. The imperfect rendering is retained as evidence rather than replaced with an idealized scene. This single episode is illustrative, not an aggregate image-quality result.}
+\caption{An archived held-out episode: observed frames, reconstructions from each current observation, and open-loop predictions conditioned on recorded actions. Rows use the same saved timestamps. The predicted row starts from one encoded observation; it does not receive the later frames. The imperfect rendering is retained as evidence rather than replaced with an idealized scene. This single episode is illustrative, not an aggregate image-quality result.}
 \label{fig:images}
 \end{figure}
 
@@ -176,24 +176,24 @@ Condition & WAM success (\%) & BC success (\%)\\
 400 episodes, pixel input & $80.3\pm12.0$ & $36.0\pm19.8$\\
 \bottomrule
 \end{tabular}
-\caption{Archived closed-loop success: mean and population standard deviation across three seeds, each evaluated on 100 episodes. The longer 25-episode run approximately matches the standard update budget; it does not match total computation between architectures. BC denotes the repository's VLA comparator.}
+\caption{Archived closed-loop success: mean and population standard deviation across three runs, each evaluated on 100 episodes. The longer 25-episode run approximately matches the standard update budget; it does not match total computation between architectures. BC denotes the repository's VLA comparator.}
 \label{tab:policy}
 \end{table}
 
 With state inputs, both policies succeed on all 300 evaluation episodes in the standard condition. This is a ceiling effect, not evidence that their behavior is identical. With 25 collection episodes and 15 epochs, auxiliary prediction coincides with worse control. Training for 225 epochs narrows the gap substantially (Table~\ref{tab:policy}), making optimization budget a plausible contributor to the short-run deficit. It does not establish the remaining gap's cause.
 
-The pixel-input result is more interesting. WAM/BC success rates are 97/23, 69/64, and 75/21 percent across the three seeds. The average difference is 44.3 percentage points, but the paired differences range from 5 to 74 points. This is a promising observation with substantial variability, not a stable estimate of a general world-model benefit.
+The pixel-input result is more interesting. The WAM outperforms BC in each of the three runs, by 44.3 percentage points on average, but the paired differences range from 5 to 74 points. This is a promising observation with substantial variability, not a stable estimate of a general world-model benefit.
 
 Most importantly, WAM has supervised state targets that BC lacks. A policy trained with current-state reconstruction alone could benefit from the same localization signal without learning transitions. Future-state supervision, image reconstruction, latent consistency, and changes in the usable training windows are also entangled. The fresh pilot in Section~\ref{sec:pilot} begins to separate these effects. The archived comparison alone cannot establish that learned dynamics is the cause.
 
 \section{Fresh simulator and system-identification audit}
 \label{sec:audit}
-To test whether the neural results reflect intrinsic task difficulty, we implemented a separate CPU experiment with five seeds. It fits an affine transition predictor from state and action and compares it with an affine predictor that does not receive action. Each collection condition uses 60 training episodes and a separate bank of 20 held-out episodes, with a 60-step cap. Counterfactual tests branch from up to 512 held-out states per seed under ten independent uniform actions. Both predictors use privileged state. These are diagnostic baselines for the transition problem, not alternatives to a visual encoder or a complete policy.
+To test whether the neural results reflect intrinsic task difficulty, we implemented a separate CPU experiment with five independent runs. It fits an affine transition predictor from state and action and compares it with an affine predictor that does not receive action. Each collection condition uses 60 training episodes and a separate bank of 20 held-out episodes, with a 60-step cap. Counterfactual tests branch from up to 512 held-out states per run under ten independent uniform actions. Both predictors use privileged state. These are diagnostic baselines for the transition problem, not alternatives to a visual encoder or a complete policy.
 
 \subsection{A structured baseline recovers the dynamics}
-The action-conditioned predictor fits a state increment from training-standardized features $[s_t,a_t,1]$ and adds it to $s_t$. Its position outputs are clipped to the arena after each recursive step, matching the known boundary rule. The action-free comparator uses $[s_t,1]$. Fitting uses training trajectories only, while factual and randomized-action evaluation use separate states. All collection conditions share the evaluation bank within a seed. Errors are reported separately for position and normalized velocity in raw coordinates, avoiding condition-specific NMSE denominators.
+The action-conditioned predictor fits a state increment from training-standardized features $[s_t,a_t,1]$ and adds it to $s_t$. Its position outputs are clipped to the arena after each recursive step, matching the known boundary rule. The action-free comparator uses $[s_t,1]$. Fitting uses training trajectories only, while factual and randomized-action evaluation use separate states. All collection conditions share the evaluation bank within a run. Errors are reported separately for position and normalized velocity in raw coordinates, avoiding condition-specific NMSE denominators.
 
-Even deterministic expert data yields a full-rank action-conditioned design matrix in all five seeds. The matrix has nine columns and rank nine, with condition numbers between approximately 13.5 and 16.2. The fitted action-conditioned model's 10-step counterfactual position MSE is about $4.3\times10^{-16}$, near the numerical floor of this test. The action-free model has much larger counterfactual position error, about $9.9\times10^{-3}$ at ten steps. Its one-step factual position MSE is about $2.1\times10^{-6}$.
+Even deterministic expert data yields a full-rank action-conditioned design matrix in all five runs. The matrix has nine columns and rank nine, with condition numbers between approximately 13.5 and 16.2. The fitted action-conditioned model's 10-step counterfactual position MSE is about $4.3\times10^{-16}$, near the numerical floor of this test. The action-free model has much larger counterfactual position error, about $9.9\times10^{-3}$ at ten steps. Its one-step factual position MSE is about $2.1\times10^{-6}$.
 
 This result changes the interpretation of the archived experiment. The neural model may benefit from exploratory trajectories, but the deterministic expert trajectories already identify the transition within this restricted model class. The clipped expert is piecewise affine, and variation across its operating regions can break the linear dependence that would arise from a single unconstrained linear feedback rule. The observed full rank is empirical evidence for these sampled datasets, not a theorem about every expert policy.
 
@@ -212,24 +212,24 @@ This matters for the earlier pixel-input interpretation. The deployed policy re-
 
 \section{A matched supervision pilot on Explorer}
 \label{sec:pilot}
-We next trained three pixel-input conditions on Northeastern's Explorer cluster: behavioral cloning alone, cloning with current-state prediction, and cloning with current and five-step future-state prediction. Each of five seeds collects 200 episodes at burst probability 0.3, holds out 10\% by episode, and trains for 15 epochs. All conditions use identical five-step training starts, expert masks, encoder and policy initialization, minibatch order, and update counts within a seed. Current and future state losses each have weight 0.5. Pixel reconstruction and latent consistency are excluded, so this is a targeted supervision experiment rather than a replication of the full archived WAM.
+We next trained three pixel-input conditions on Northeastern's Explorer cluster: behavioral cloning alone, cloning with current-state prediction, and cloning with current and five-step future-state prediction. Each of five independent runs collects 200 episodes at burst probability 0.3, holds out 10\% by episode, and trains for 15 epochs. All conditions use identical five-step training starts, expert masks, encoder and policy initialization, minibatch order, and update counts within a run. Current and future state losses each have weight 0.5. Pixel reconstruction and latent consistency are excluded, so this is a targeted supervision experiment rather than a replication of the full archived WAM.
 
 \begin{table}[t]
 \centering\small
-\begin{tabular}{lrrrrrr}
+\begin{tabular}{lrr}
 \toprule
-Supervision & Seed 0 & Seed 1 & Seed 2 & Seed 3 & Seed 4 & Mean $\pm$ SD\\
+Supervision & Mean $\pm$ SD & Range\\
 \midrule
-Actions only & 21 & 18 & 0 & 27 & 19 & $17.0\pm10.1$\\
-+ Current state & 26 & 24 & 26 & 38 & 28 & $28.4\pm5.5$\\
-+ Future state & 33 & 33 & 30 & 36 & 36 & $33.6\pm2.5$\\
+Actions only & $17.0\pm10.1$ & 0--27\\
++ Current state & $28.4\pm5.5$ & 24--38\\
++ Future state & $33.6\pm2.5$ & 30--36\\
 \bottomrule
 \end{tabular}
-\caption{Fresh Explorer pilot: success percentages on 100 paired evaluation episodes per training seed. The last row includes current-state supervision. SD is the sample standard deviation over five seeds, unlike the population SD in the archived tables.}
+\caption{Fresh Explorer pilot: success percentages on 100 paired evaluation episodes per training run. The last row includes current-state supervision. SD is the sample standard deviation over five runs, unlike the population SD in the archived tables.}
 \label{tab:pilot}
 \end{table}
 
-Current-state supervision improves the mean by 11.4 percentage points over cloning. Adding future-state prediction gives a further 5.2 points on average, with paired differences of 7, 9, 4, $-2$, and 8 points (Table~\ref{tab:pilot}). Thus current-state supervision accounts for a substantial part of the gain in this pilot, while future prediction adds a smaller, non-uniform benefit. The result is more informative than comparing the full auxiliary objective only against cloning.
+Current-state supervision improves the mean by 11.4 percentage points over cloning. Adding future-state prediction gives a further 5.2 points on average; the paired difference is positive in four of five runs and ranges from $-2$ to 9 points (Table~\ref{tab:pilot}). Thus current-state supervision accounts for a substantial part of the gain in this pilot, while future prediction adds a smaller, non-uniform benefit. The result is more informative than comparing the full auxiliary objective only against cloning.
 
 Absolute success remains low, and this pilot uses half the archived collection budget. It neither establishes convergence nor explains the magnitude of the archived 44.3-point gap. It also lacks a history baseline and a state-free training objective. These measurements justify a larger, preregistered mechanism study; they do not yet establish a general advantage for learned dynamics. Per-episode outcomes, dataset hashes, source hashes, and configuration manifests are retained for all 15 trained models. The models act reactively throughout evaluation.
 
@@ -245,12 +245,12 @@ Finally, the model must influence decisions if the claim concerns planning. A co
 The point-mass task should remain a diagnostic setting. A publication-level robotics claim needs contact-rich or partially observed tasks with a reason for prediction to matter, multiple dynamics regimes, and comparisons to contemporary methods. A separate research plan accompanying the source specifies these experiments and their decision gates. They are proposed work, not completed results in this paper.
 
 \section{Limitations and conclusion}
-The study is limited by a single low-dimensional simulator, three archived neural seeds, five fresh pilot seeds, and incomplete original training provenance. The state-input task leaks goal identity through the selected target coordinates. The pixel-input task uses privileged supervision and lacks a memory baseline. The linear readout is jointly supervised, the image decoder underperforms persistence, and the forward model is not used for deployed planning. These are restrictions on what the results establish, not details that a change in writing style can remove.
+The study is limited by a single low-dimensional simulator, three archived neural runs, five fresh pilot runs, and incomplete original training provenance. The state-input task leaks goal identity through the selected target coordinates. The pixel-input task uses privileged supervision and lacks a memory baseline. The linear readout is jointly supervised, the image decoder underperforms persistence, and the forward model is not used for deployed planning. These are restrictions on what the results establish, not details that a change in writing style can remove.
 
 Within that scope, mini-WAM is useful as an experimental instrument. It exposes a gap between factual and counterfactual prediction, a separation between state and image quality, and a possible benefit from auxiliary supervision under restricted observations. The fresh affine audit also supplies an instructive negative result: the neural counterfactual failure is not inevitable for the available expert data. A research contribution should explain these differences through controlled experiments. The current evidence supports that investigation, but not a claim that a new world-action method has already improved robotic decision-making.
 
 \paragraph{Reproducibility and provenance.}
-Archived measurements and figure arrays are retained under \texttt{docs/results/}; the new simulator audit records seeds, configuration, software versions, and source hashes separately. Environment images are actual renders, and neural reconstructions are preserved from the archived arrays. The accompanying research plan distinguishes completed diagnostics from planned training and robotics experiments. The source repository is \url{https://github.com/keivalya/mini-wam}.
+Archived measurements and figure arrays are retained under \texttt{docs/results/}; the new simulator audit records its full configuration, software versions, and source hashes separately. Environment images are actual renders, and neural reconstructions are preserved from the archived arrays. The accompanying research plan distinguishes completed diagnostics from planned training and robotics experiments. The source repository is \url{https://github.com/keivalya/mini-wam}.
 
 \paragraph{Assistance disclosure.}
 AI assistance was used to audit code, develop diagnostic experiments, check literature and venue information, and revise this manuscript. The results presented as fresh measurements were executed; archived results are labeled as such. Author review of the scientific claims and submission-specific disclosure remains necessary.
