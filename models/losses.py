@@ -1,4 +1,4 @@
-"""Training losses for mini-WAM (and its VLA baseline).
+"""Training losses for picoWAM (and its VLA baseline).
 
 VLA:
     L = w_a * L_action
@@ -23,7 +23,7 @@ do; the latent term keeps imagined latents "in distribution", so the
 action head and decoders still make sense on them.
 
 All state losses are computed in normalized state space (see
-MiniWAMPolicy.normalize_state), so every state dimension counts equally.
+PicoWAMPolicy.normalize_state), so every state dimension counts equally.
 """
 
 from dataclasses import dataclass

@@ -1,4 +1,4 @@
-"""Image decoder for mini-WAM: latent -> picture of the world.
+"""Image decoder for picoWAM: latent -> picture of the world.
 
 The decoder turns any latent z (encoded from a real observation, or imagined
 by the latent dynamics) back into an RGB image. Decoding imagined latents is
@@ -44,7 +44,7 @@ class ImageDecoder(nn.Module):
         layers.append(nn.Conv2d(ch, 3, kernel_size=3, padding=1))
         self.deconv = nn.Sequential(*layers)
 
-        # set from the dataset before training (MiniWAMPolicy.set_image_mean)
+        # set from the dataset before training (PicoWAMPolicy.set_image_mean)
         self.register_buffer("mean_image", torch.full((3, image_size, image_size), 0.5))
 
     def forward(self, z):

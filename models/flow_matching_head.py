@@ -1,4 +1,4 @@
-"""Flow-matching action head for mini-WAM.
+"""Flow-matching action head for picoWAM.
 
 Learns to transport Gaussian noise into expert actions.
 

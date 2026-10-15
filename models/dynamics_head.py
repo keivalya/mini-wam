@@ -1,4 +1,4 @@
-"""World-model heads for mini-WAM: latent dynamics + state readout.
+"""World-model heads for picoWAM: latent dynamics + state readout.
 
 The WAM keeps a latent world state z_t (the fused observation token).
 
