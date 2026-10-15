@@ -1,268 +1,370 @@
 \documentclass[11pt]{article}
-\usepackage[letterpaper,textwidth=5.8in,textheight=8.8in]{geometry}
-\usepackage{amsmath,amssymb,graphicx,booktabs,array,tabularx}
+\usepackage[letterpaper,textwidth=5.8in,textheight=8.9in]{geometry}
+\usepackage{amsmath,amssymb,graphicx,booktabs,array,tabularx,multirow}
 \usepackage[numbers,sort&compress]{natbib}
 \usepackage[hidelinks]{hyperref}
 \usepackage{microtype}
+\usepackage{xcolor}
 \usepackage[font=small,labelfont=bf]{caption}
+\usepackage[section]{placeins}  % keep each section's floats inside the section
+\renewcommand{\topfraction}{0.92}
+\renewcommand{\bottomfraction}{0.8}
+\renewcommand{\textfraction}{0.06}
+\renewcommand{\floatpagefraction}{0.8}
+\setcounter{topnumber}{3}
+\setcounter{bottomnumber}{2}
+\setcounter{totalnumber}{4}
+\usepackage{tikz}
+\usetikzlibrary{positioning,fit,backgrounds,arrows.meta,calc}
 \setlength{\emergencystretch}{2em}
 \newcommand{\figpath}{../figures}
-\title{Prediction Is Not Yet Control:\\An Empirical Audit of a Small World--Action Model}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+
+% one colour per role, shared with the plots
+\definecolor{wam}{HTML}{D55E00}
+\definecolor{vla}{HTML}{0072B2}
+\definecolor{ink}{HTML}{333333}
+
+\tikzset{
+  box/.style={draw=ink, rounded corners=2pt, align=center, inner sep=2.5pt, minimum height=6mm, fill=white, font=\footnotesize},
+  io/.style={align=center, inner sep=1pt, font=\footnotesize},
+  lat/.style={draw=ink, circle, align=center, inner sep=0.5pt, minimum size=8.5mm, fill=gray!8, font=\footnotesize},
+  ours/.style={box, draw=wam, fill=wam!10, thick},
+  flow/.style={-{Stealth[length=1.7mm]}, ink},
+  aflow/.style={-{Stealth[length=1.7mm]}, wam, dashed},
+  lbl/.style={font=\scriptsize, text=ink!80, align=center},
+  opt/.style={draw=ink!40, rounded corners=2pt, align=center, inner sep=2pt, text width=2.55cm, minimum height=5.5mm, fill=white, font=\scriptsize},
+  pick/.style={opt, draw=wam, fill=wam!12, thick},
+  head/.style={align=center, font=\footnotesize\bfseries, text width=2.7cm},
+}
+
+\title{Building a World Action Model from Scratch:\\Design Decisions, Lessons, and a Map of Open WAMs}
 \author{Keivalya Pandya\\Northeastern University}
 \date{}
+
 \begin{document}
 \maketitle
+
 \begin{abstract}
-A learned forward model can predict demonstrations accurately without supporting reliable decisions about alternative actions. We examine this distinction in mini-WAM, a compact policy with shared latent dynamics, using a two-dimensional navigation environment whose transitions can be checked directly. Archived experiments across three independent runs show low state-prediction error, but no policy improvement when the physical state is supplied. Removing state inputs increases the observed success gap in favor of joint prediction, from zero to 44.3 percentage points, although privileged state supervision and unequal training windows prevent a clean attribution to dynamics learning. A fresh five-run supervision pilot obtains 17.0\% success with behavioral cloning, 28.4\% with current-state supervision, and 33.6\% with additional future-state prediction. Image predictions also perform worse than copying the current frame. A fresh five-run system-identification audit finds that an action-conditioned affine model fits the toy dynamics to numerical precision, even with deterministic expert data. This result narrows the interpretation of the neural model's counterfactual failures: they are not an unavoidable property of this environment or its demonstrations. We separate predictive accuracy, observation sufficiency, and control utility, and identify the comparisons needed before claiming that learned world models improve decision-making.
+A vision-language-action (VLA) policy learns what to do. A world action model (WAM) also learns what will happen when it does it. Today's WAMs are large video models that few people can train, which makes their design hard to study. We introduce \textbf{mini-WAM}, a 0.75M-parameter WAM written from scratch in about 1,000 lines of PyTorch, and use it to walk through the decisions every WAM makes: what to predict, how actions meet the future, which backbone to use, and what the prediction is for at test time. We place eight open-source WAMs on the same map. On a toy navigation world with a true simulator, mini-WAM's latent dynamics imagines 15 steps ahead with ${\sim}80\times$ less state error than persistence. Three lessons stand out. Expert-only data hides action effects: counterfactual error grows $15\times$ while factual error even improves. Prediction helps the policy only when the observation hides state: with pixel input, success rises from 36\% to 80\%, and a separate matched pilot suggests that most of such a gain comes from state supervision rather than from dynamics. Pixels dominate the cost: the image decoder holds half the parameters and $90\%$ of the training compute. Code, data and every figure's source are public.
 \end{abstract}
 
-\section{Introduction}
-A policy and a forward model answer different questions. A policy selects an action from the information available now. A forward model predicts the consequences of an action, including actions the policy would rarely choose. Sharing their representations is appealing: prediction may encourage a policy to encode features that matter for control. Yet a reduction in prediction error does not establish that the resulting policy makes better decisions.
+% =====================================================================
+\section{From acting to predicting}
 
-The distinction is easy to lose in a small demonstration. A model may produce plausible rollouts, expose interpretable latent coordinates, and reach a goal reliably. Each observation is useful, but none by itself shows that the forward model is necessary. If the state already specifies the goal and velocity, a reactive controller may solve the task. If evaluation follows the expert's actions, a predictor may exploit regularities of the expert rather than learn a transition rule that generalizes to other controls.
+A VLA maps an image, an instruction and the robot state to an action. Nothing in its training asks what the action will do. A world model answers exactly that question, but does not choose actions. A WAM does both with one network (Figure~\ref{fig:paradigms}). Recent surveys define WAMs as models that ``connect future-state modeling with executable action generation'' \citep{lu2026survey} and sort them by the future they produce: pixels, latents, or none at all \citep{shen2026survey}.
 
-We study these issues in mini-WAM, an existing compact implementation of a policy and action-conditioned latent predictor. The environment is deliberately simple: a point mass moves with damped momentum toward one of two colored goals. Its simplicity permits exact interventions and inexpensive comparisons. It also makes strong baselines essential. Away from position clipping at the arena boundary, its dynamics are affine; a large improvement over a stationary prediction is therefore a weak test of modeling ability.
-
-This paper asks three questions. First, how does prediction on recorded trajectories relate to prediction under alternative actions? Second, what can joint prediction explain about policy performance when observations omit velocity? Third, which apparent benefits survive comparison with a model matched to the environment's structure?
-
-The evidence gives a qualified answer. The archived neural results contain a substantial gap between expert-only and exploratory data in counterfactual prediction. They also contain a promising, variable improvement in pixel-input control. However, a new affine baseline learns the transition law from expert trajectories alone, and a direct rendering test confirms that opposite velocities can produce identical observations. These findings rule out two stronger interpretations: that exploration is intrinsically necessary to identify this particular simulator, and that imagined rollouts recover information missing from a single image without further assumptions.
-
-Our contribution is an empirical audit, rather than a new world-model architecture. We bring the archived measurements, executable simulator checks, and missing controls into one account. The scope is a single toy task family. We do not claim a new planning algorithm, general language grounding, or evidence of transfer to physical robots.
-
-\section{Related work}
-Learning a compact representation and predicting its evolution is established practice in model-based reinforcement learning. World Models \citep{ha2018} and Dreamer \citep{hafner2020} use learned dynamics to support behavior learning. TD-MPC2 \citep{hansen2024} couples latent prediction to online planning. mini-WAM shares their use of latent transitions, but its evaluated policy does not plan or optimize behavior inside the model. Its forward model supplies an auxiliary training signal and an object of analysis.
-
-A second line of work combines action prediction with representations of future observations. Unified World Models \citep{zhu2025} couples video and action diffusion. The recent, unrelated MiniWAM \citep{chen2026} learns compact predictive targets for robot policies. Our repository's name predates this comparison, but the systems should not be conflated: mini-WAM here is a small supervised diagnostic implementation, not that method or a reproduction of its results. Compactness alone is not an architectural novelty claim.
-
-The concern about factual prediction is also not new. Causal confusion in imitation learning \citep{dehaan2019} shows how observational regularities can mislead policies. More directly, AD-WM \citep{qiu2026} studies action discrimination for counterfactual model predictive control. It proposes action-recovery objectives and evaluates decision-relevant diagnostics. Consequently, observing a factual--counterfactual gap in mini-WAM does not establish priority for that problem. A stronger contribution would need a distinct mechanism, a controlled evaluation protocol with demonstrated value, or evidence that existing explanations fail in a meaningful setting.
-
-Finally, our linear state head is supervised jointly with the representation. Its accuracy measures whether the requested state can be read out after training; it is not an independent probe of spontaneously learned structure. Post-hoc probes \citep{alain2016} require a separate fitting and evaluation procedure. This distinction matters especially when the same state variables are both encoder inputs and reconstruction targets.
-
-\section{Environment and observation model}
-\label{sec:environment}
-The agent moves in the unit square. Each episode contains a blue goal and a green goal, and an instruction selects one of them. The renderer produces a $64\times64$ RGB image with a red disk for the agent and colored squares for the goals (Figure~\ref{fig:env}). Initial velocity is zero. Agent and goal positions are sampled with minimum separations so that episodes do not begin at success.
-
-\begin{figure}[t]
+\begin{figure}[!htbp]
 \centering
-\includegraphics[width=\linewidth]{\figpath/research-environment.pdf}
-\caption{Actual simulator frames from a deterministic expert rollout. The instruction selects the blue square; the green square remains a distractor. Positions and colors are rendered by the environment, without illustrative replacements. Velocity is not drawn. These frames describe the task, not a learned policy's performance.}
-\label{fig:env}
+\begin{tikzpicture}[node distance=2.5mm and 4mm]
+  % (a) VLA
+  \node[io] (o1) {$o_t,\ \ell$};
+  \node[box, right=of o1] (p1) {policy};
+  \node[io, right=of p1] (a1) {$a_t$};
+  \draw[flow] (o1) -- (p1); \draw[flow] (p1) -- (a1);
+  \node[lbl, above=1mm of p1] {(a) VLA: act};
+  % (b) world model
+  \node[io, right=12mm of a1] (o2) {$o_t,\ a_t$};
+  \node[box, right=of o2] (f2) {dynamics};
+  \node[io, right=of f2] (s2) {$o_{t+1}$};
+  \draw[flow] (o2) -- (f2); \draw[flow] (f2) -- (s2);
+  \node[lbl, above=1mm of f2] {(b) world model: predict};
+  % (c) WAM
+  \node[io, below=11mm of o1] (o3) {$o_t,\ \ell$};
+  \node[box, right=of o3] (e3) {encoder};
+  \node[lat, right=of e3] (z3) {$z_t$};
+  \node[box, right=6mm of z3, yshift=6mm] (p3) {policy};
+  \node[io, right=of p3] (a3) {$a_t$};
+  \node[ours, right=6mm of z3, yshift=-6mm] (f3) {dynamics};
+  \node[lat, right=of f3] (z31) {$\hat z_{t+1}$};
+  \node[box, right=of z31] (r3) {readouts};
+  \node[io, right=of r3] (y3) {$\hat s_{t+1},\ \hat o_{t+1}$};
+  \draw[flow] (o3) -- (e3); \draw[flow] (e3) -- (z3);
+  \draw[flow] (z3) -- (p3.west); \draw[flow] (z3) -- (f3.west);
+  \draw[flow] (p3) -- (a3); \draw[flow] (f3) -- (z31); \draw[flow] (z31) -- (r3); \draw[flow] (r3) -- (y3);
+  \draw[aflow] (a3.south) |- ($(f3.north)+(0,1.2mm)$) -- (f3.north);
+  \node[lbl, left=2mm of o3, anchor=east, align=right] {(c) WAM:\\act and predict};
+\end{tikzpicture}
+\caption{\textbf{Three ways to use a model of the world.} (a) A VLA maps the current observation $o_t$ and instruction $\ell$ to an action. (b) A world model maps an observation and an action to the next observation; it predicts but never decides. (c) A WAM shares one representation $z_t$ between a policy and an action-conditioned dynamics model (orange). The dynamics can be rolled forward with any action, so the model can be asked what its own action, or any other, will do. mini-WAM implements (c) with a 128-dimensional latent and reads predicted latents out as physical states and images.}
+\label{fig:paradigms}
 \end{figure}
 
-Let $p_t\in[0,1]^2$ be position, $v_t\in\mathbb R^2$ physical velocity, and $a_t\in[-1,1]^2$ the applied force. The transition is
-\begin{equation}
- v_{t+1}=0.8v_t+0.01a_t,\qquad
- p_{t+1}=\operatorname{clip}(p_t+v_{t+1},0,1).
- \label{eq:physics}
-\end{equation}
-The state returned by the environment is $s_t=(p_t,u_t,g)$, where $u_t=v_t/0.05$ is normalized velocity and $g$ is the selected goal position. Thus $u_{t+1}=0.8u_t+0.2a_t$. Success requires distance to the selected goal below 0.05 and normalized speed below 0.2. Position clipping does not reset velocity; this boundary rule must be preserved by counterfactual simulations.
+Open WAMs now reach billions of parameters \citep{liao2025genie,kim2026cosmospolicy,li2026lingbotva}, and Genie Envisioner pretrains on a million real robot episodes \citep{liao2025genie}. That scale buys capability, but it hides the basic questions behind compute. What does the dynamics part actually learn? When does predicting the future make the policy better? Which choices are expensive? Conceptual tutorials map this design space \citep{zhang2026tutorial}, and minimal codebases exist for video prediction \citep{huang2026nano}, but neither lets you train a complete WAM and look inside it in an afternoon.
 
-The expert is a clipped proportional--derivative controller,
-\begin{equation}
- a_t=\operatorname{clip}\left(5(g-p_t)-2u_t+\epsilon_t,-1,1\right),
- \qquad \epsilon_t\sim\mathcal N(0,0.1^2 I).
-\end{equation}
-The collection procedure can replace expert actions with short random-action bursts. Those transitions train the world model but are masked out of the imitation loss. Burst-start probability is a collection parameter, not the measured fraction of random transitions: burst duration and episode termination also affect that fraction.
+We build that WAM. Our contributions are:
+\begin{itemize}\itemsep0pt
+  \item \textbf{A map of WAM design decisions}, with eight open-source WAMs placed on it (Figure~\ref{fig:design}, Table~\ref{tab:wams}).
+  \item \textbf{mini-WAM}, a from-scratch WAM in which each module added to the VLA is under 100 lines, plus a toy world with a true simulator for counterfactual tests (Section~\ref{sec:build}).
+  \item \textbf{A record of what worked and what did not}, from data and losses to decoder design, measured over independent runs (Section~\ref{sec:lessons}, Table~\ref{tab:lessons}).
+  \item \textbf{A cost breakdown} that shows where a small WAM spends parameters and compute (Section~\ref{sec:efficiency}).
+\end{itemize}
+An unrelated paper also uses the name MiniWAM \citep{chen2026miniwam}; our project is a separate educational implementation.
 
-Two observation regimes must be distinguished. In the state-input regime, the encoder receives the image, instruction, and all six state coordinates. Because $g$ already identifies the selected goal, this regime does not require language understanding or visual localization. In the pixel-input regime, the state-encoder contribution is zeroed out. The WAM nevertheless retains supervised state-prediction targets during training. It is therefore a pixel-input policy with privileged training supervision, not a method trained from pixels alone.
+% =====================================================================
+\section{The WAM design space}
+\label{sec:design}
 
-The renderer depends on positions and goal colors, but not velocity. Holding the scene fixed while reversing velocity produces exactly the same image. A memoryless encoder therefore cannot distinguish those states. Correlations in the training distribution may still make velocity partly predictable, but they do not resolve the underlying observation ambiguity.
+Every WAM answers four questions (Figure~\ref{fig:design}). Table~\ref{tab:wams} shows how eight widely used open-source systems answer them.
 
-\section{Model and learning objective}
-The encoder combines a spatial-softmax image representation, a small text GRU, and a state MLP into a 128-dimensional latent vector. A fusion MLP followed by layer normalization produces
-\begin{equation}
- z_t=E_\theta(I_t,\ell,\tilde s_t),\qquad
- a_t=\pi_\theta(z_t),
-\end{equation}
-where $\tilde s_t$ uses training-set normalization. In the pixel-input condition the state branch is replaced by zeros before fusion. All reported archived experiments use the MLP action head; available diffusion and flow heads are not evaluated here.
-
-The forward model applies a residual MLP to the latent and action:
-\begin{equation}
- \hat z_{t+k+1}=F_\theta(\hat z_{t+k},a_{t+k}),\quad
- F_\theta(z,a)=\operatorname{LN}(z+f_\theta([z,a])),\quad \hat z_t=z_t.
-\end{equation}
-A linear head $R(z)=Wz+b$ predicts normalized state. An image decoder $D$ predicts RGB residuals around the training-set mean image. The same readouts operate on encoded and predicted latents. Layer normalization controls latent scale, but does not guarantee that predicted latents lie on the distribution of encoded observations.
-
-For an $H$-step training window, define
-\begin{align}
- \mathcal L_s&=\operatorname{MSE}(R(z_t),\tilde s_t)
- +\frac1H\sum_{k=1}^H\operatorname{MSE}(R(\hat z_{t+k}),\tilde s_{t+k}),\\
- \mathcal L_I&=\operatorname{MSE}(D(z_t),I_t)
- +\frac1H\sum_{k=1}^H\operatorname{MSE}(D(\hat z_{t+k}),I_{t+k}),\\
- \mathcal L_z&=\frac1H\sum_{k=1}^H\operatorname{MSE}\left(\hat z_{t+k},
- \operatorname{sg}[E_\theta(I_{t+k},\ell,\tilde s_{t+k})]\right).
-\end{align}
-The objective is $\mathcal L=\mathcal L_a+0.5\mathcal L_s+\mathcal L_I+\mathcal L_z$, with expert-only action regression $\mathcal L_a$ and stop-gradient operator $\operatorname{sg}$. Each MSE averages over its output coordinates. The default horizon is five. Removing all three auxiliary losses gives the behavioral-cloning comparator, called VLA in the repository. It has the same encoder design but is trained from scratch and should not be confused with a pretrained robot foundation model.
-
-At deployment, both policies encode the current observation and emit an action. The WAM does not feed an imagined trajectory into its action head, retain a recurrent belief, or search over candidate plans. Any control difference in the archived experiments must arise through training, not online use of the forward model.
-
-\section{Evidence and evaluation protocol}
-\label{sec:protocol}
-We distinguish two sources of evidence. The archived study consists of committed per-run JSON metrics and exported arrays used for figures. Its standard configuration uses 400 episodes, a 90/10 episode split, three independent training runs, 15 training epochs, and 100 closed-loop evaluation episodes per run. The initial audit checkout contains neither the original training datasets nor checkpoints. The archived numbers can be reaggregated, but that does not independently reproduce the training runs. Fresh simulator and affine-baseline experiments are described separately in Section~\ref{sec:audit}.
-
-Offline neural evaluation rolls the latent forward from each valid start in a held-out episode, using the recorded actions without re-encoding future observations. At horizon $k$, state error is
-\begin{equation}
- \operatorname{NMSE}_k=\frac{1}{N_kd}\sum_{i=1}^{N_k}\sum_{j=1}^{d}
- \left(\frac{\hat s^{(i)}_{t+k,j}-s^{(i)}_{t+k,j}}{\sigma_j}\right)^2,
-\end{equation}
-where $\sigma_j$ is the training-set standard deviation. Factual evaluation uses all six state dimensions; counterfactual evaluation uses only position and normalized velocity. Their values should not be compared as though they were the same metric.
-
-For counterfactual evaluation, the simulator branches from held-out states under sampled random action sequences. The learned prediction is compared with that branch, and a zero-action simulator trajectory supplies a reference. This reference has access to the true initial state and dynamics; it tests the cost of disregarding the candidate action, not the best achievable learned predictor. The factual copy baseline instead holds the current state or image fixed.
-
-Reported archived spreads are population standard deviations across three training runs, matching the saved aggregation code. They are descriptive spreads, not confidence intervals. Overlapping windows from an episode are correlated, and the number of valid starts decreases with horizon. Treating all windows as independent replications would substantially overstate precision. The held-out episodes are also used for validation logging, so these offline measurements are not an untouched final test set.
-
-There are further comparison limits. WAM training uses horizon-length windows, excluding the final $H-1$ starts of each episode; behavioral cloning uses one-step windows. Thus the models do not see identical sets of supervised policy starts. Changing exploration also changes trajectory distributions, termination times, and normalization scales. A comparison between exploration conditions is suggestive, but does not isolate the effect of action diversity while holding everything else fixed.
-
-\section{Archived results}
-\subsection{State prediction is accurate relative to persistence}
-With state inputs, the WAM's 15-step state NMSE is $0.00712\pm0.00038$, compared with $0.58243\pm0.01478$ for copying the initial state. The ratio of aggregate means is about 82. This establishes that the model predicts motion substantially better than persistence on the recorded trajectories. It does not establish an advantage over system identification, a state-space MLP, or a model-based controller.
-
-The result also includes two static goal coordinates, which are directly supplied to the encoder. Low error on the six-dimensional average can conceal larger errors on moving quantities. Reporting separate position and velocity errors, together with physical units, is necessary for interpreting control relevance. In Section~\ref{sec:audit}, we use those separate quantities for the fresh baseline study.
-
-\subsection{Action coverage changes the prediction problem}
-\begin{figure}[t]
+\begin{figure}[!htbp]
 \centering
-\includegraphics[width=\linewidth]{\figpath/research-coverage.pdf}
-\caption{Archived neural prediction errors, means and population standard deviations over three runs. Expert-only data gives lower long-horizon factual error but higher error under random counterfactual actions. The two panels use different state dimensions; exploration conditions also have different trajectory distributions and normalization statistics. The curves demonstrate an evaluation gap, not a controlled causal estimate of exploration's benefit.}
+\begin{tikzpicture}[node distance=1.6mm and 3mm]
+  \node[head] (h1) {1. What is predicted?};
+  \node[head, right=of h1] (h2) {2. How do actions meet the future?};
+  \node[head, right=of h2] (h3) {3. Which backbone?};
+  \node[head, right=of h3] (h4) {4. What is the prediction for?};
+  % column 1
+  \node[opt, below=2mm of h1] (c11) {future pixels / video latents};
+  \node[pick, below=of c11] (c12) {physical state};
+  \node[opt, below=of c12] (c13) {learned representation (JEPA)};
+  \node[opt, below=of c13] (c14) {nothing (video-free)};
+  % column 2
+  \node[pick, below=2mm of h2] (c21) {joint prediction with the action};
+  \node[opt, below=of c21] (c22) {plan, then act (inverse dynamics)};
+  \node[pick, below=of c22] (c23) {action-conditioned forward model};
+  % column 3
+  \node[opt, below=2mm of h3] (c31) {video diffusion transformer};
+  \node[opt, below=of c31] (c32) {autoregressive token transformer};
+  \node[opt, below=of c32] (c33) {representation predictor};
+  \node[pick, below=of c33] (c34) {small MLPs};
+  % column 4
+  \node[pick, below=2mm of h4] (c41) {auxiliary training signal};
+  \node[opt, below=of c41] (c42) {planning (MPC, best-of-$N$)};
+  \node[opt, below=of c42] (c43) {decoding actions from the predicted future};
+  \node[opt, below=of c43] (c44) {synthetic training data};
+  \draw[wam, thick, -{Stealth[length=1.7mm]}] (c12.east) -- (c21.west);
+  \draw[wam, thick, -{Stealth[length=1.7mm]}] (c12.east) -- (c23.west);
+  \draw[wam, thick, -{Stealth[length=1.7mm]}] (c21.east) -- (c34.west);
+  \draw[wam, thick, -{Stealth[length=1.7mm]}] (c23.east) -- (c34.west);
+  \draw[wam, thick, -{Stealth[length=1.7mm]}] (c34.east) -- (c41.west);
+\end{tikzpicture}
+\caption{\textbf{The four decisions behind every WAM, and mini-WAM's path through them (orange).} (1) The prediction target ranges from pixels to compact learned representations, or no future at all. mini-WAM predicts the physical state (and, as an option, pixels). (2) Actions and futures can be generated together, the future can be generated first and an inverse-dynamics model can read the action off it, or an explicit forward model can take any action as input. mini-WAM combines joint training with an action-conditioned forward model. (3) Backbones range from billion-parameter video diffusion transformers to small MLPs. (4) The prediction can shape the representation during training, rank candidate actions at test time, produce the action directly, or generate data for another policy. mini-WAM uses it only as a training signal, the cheapest and most common choice. Table~\ref{tab:wams} places eight open-source WAMs on the same map.}
+\label{fig:design}
+\end{figure}
+
+\begin{table}[!htbp]
+\centering\footnotesize
+\begin{tabularx}{\linewidth}{>{\hsize=0.62\hsize}L >{\hsize=1.0\hsize}L >{\hsize=1.15\hsize}L >{\hsize=1.0\hsize}L >{\hsize=1.23\hsize}L}
+\toprule
+System & Predicts & Backbone & Action decoding & Future used for \\
+\midrule
+GR-1 \citep{wu2023gr1} & future frames (image patches) & GPT-style causal transformer, video-pretrained on Ego4D clips & linear head on an \texttt{[ACT]} token & training signal \\
+UWM \citep{zhu2025uwm} & video and actions & one diffusion transformer, independent timesteps per modality & action diffusion & policy, forward or inverse dynamics, video generation \\
+WorldVLA \citep{cen2025worldvla} & next frame (VQ tokens) & autoregressive multimodal LLM (Chameleon init.) & discrete action tokens & training signal \\
+Genie Envisioner \citep{liao2025genie} & video chunks & video diffusion transformer (2B) & flow-matching action module on video latents & action decoding; neural simulator \\
+Cosmos Policy \citep{kim2026cosmospolicy} & future states and values as latent frames & Cosmos-Predict2 video diffusion (2B) & actions injected as latent frames & best-of-$N$ planning \\
+V-JEPA 2-AC \citep{assran2025vjepa2} & future representations & frozen V-JEPA 2 encoder + 300M action-conditioned predictor & none: actions come from the planner & CEM model-predictive control \\
+DreamGen \citep{jang2025dreamgen} & robot videos & fine-tuned video generation model & inverse dynamics or latent actions label the videos & synthetic training data \\
+LingBot-VA \citep{li2026lingbotva} & video latents, autoregressively & dual-stream diffusion transformer (5.3B), KV cache & inverse dynamics from the predicted future & action decoding; memory \\
+\midrule
+\textbf{mini-WAM} (ours) & physical state, pixels, latents & 3-layer CNN + GRU + MLPs (0.75M) & MLP, diffusion or flow head & training signal; analysis \\
+\bottomrule
+\end{tabularx}
+\caption{\textbf{Eight open-source WAMs on the map of Figure~\ref{fig:design}.} All eight predict some form of the future; they differ in what they predict, how actions are produced, and what the prediction is used for at test time. Two trends are visible. Large systems inherit video-generation backbones and predict latent frames rather than raw pixels. Systems that plan (Cosmos Policy, V-JEPA 2-AC) or decode actions from the future (Genie Envisioner, LingBot-VA) use the prediction at test time, while GR-1, WorldVLA and mini-WAM use it only to shape the representation during training. mini-WAM keeps every decision at the smallest scale that still exposes it, two to four orders of magnitude below the large systems. Entries summarize each paper's main configuration.}
+\label{tab:wams}
+\end{table}
+
+Three of these systems report lessons that our small model reproduces. GR-1 finds that predicting a few frames ahead helps more than predicting the next frame \citep{wu2023gr1}; mini-WAM shows the same horizon trade-off (Section~\ref{sec:lessons}). Cosmos Policy fine-tunes its planning model on policy rollouts, failures included, before trusting its predictions \citep{kim2026cosmospolicy}; mini-WAM's world model also needs non-expert actions. V-JEPA 2-AC plans in representation space and avoids generating pixels \citep{assran2025vjepa2}; in mini-WAM, pixels are where most of the cost goes (Section~\ref{sec:efficiency}).
+
+% =====================================================================
+\section{Building mini-WAM}
+\label{sec:build}
+
+\begin{figure}[!htbp]
+\centering
+\begin{tikzpicture}[node distance=2.5mm and 4.5mm]
+  \node[box] (te) {text GRU};
+  \node[box, above=1.8mm of te] (ie) {image CNN\\+ keypoints};
+  \node[box, below=1.8mm of te] (se) {state MLP};
+  \node[io, left=of ie] (img) {image $o_t$};
+  \node[io, left=of te] (txt) {instruction $\ell$};
+  \node[io, left=of se] (st) {state $s_t$};
+  \node[box, right=of te] (fu) {fusion\\MLP + LN};
+  \node[lat, right=of fu] (z) {$z_t$};
+  \foreach \u/\v in {img/ie, txt/te, st/se, ie/fu, te/fu, se/fu, fu/z} \draw[flow] (\u) -- (\v);
+  \node[box, right=9mm of z] (ro) {linear readout $R$};
+  \node[box, above=1.8mm of ro] (pol) {action head $\pi$};
+  \node[box, below=1.8mm of ro] (dec) {image decoder $D$};
+  \foreach \v in {pol, ro, dec} \draw[flow] (z) -- (\v.west);
+  \node[io, right=of pol] (a) {$a_t$};
+  \node[io, right=of ro] (sh) {$\hat s_t$};
+  \node[io, right=of dec] (ih) {$\hat o_t$};
+  \draw[flow] (pol) -- (a); \draw[flow] (ro) -- (sh); \draw[flow] (dec) -- (ih);
+  \node[ours, below=10mm of z] (dyn) {$f_\theta$: $\mathrm{LN}(z + \mathrm{MLP}[z, a])$};
+  \node[io, left=6mm of dyn, text=wam] (act) {action $a$};
+  \node[lat, right=7mm of dyn] (z1) {$\hat z_{t+1}$};
+  \draw[flow] (z) -- (dyn); \draw[aflow] (act) -- (dyn); \draw[flow] (dyn) -- (z1);
+  \node[lbl, right=3mm of z1] (z1out) {same $R$, $D$ and $\pi$\\as for $z_t$};
+  \draw[flow] (z1) -- (z1out);
+  \draw[flow, dashed] (z1.south) to[bend left=40] node[lbl, below] {repeat $k$ times} (dyn.south);
+\end{tikzpicture}
+\caption{\textbf{mini-WAM in one picture.} Three small encoders and a fusion MLP turn the image, the instruction and the robot state into one latent $z_t$. Everything else reads from that latent: the action head (MLP, diffusion or flow), a \emph{linear} state readout, and an image decoder. The world model (orange) is a residual MLP that maps $(z, a)$ to the next latent; LayerNorm keeps imagined latents on the scale of encoded ones. Applying $f_\theta$ repeatedly with any action sequence ``imagines'' the future, and the same readouts turn every imagined latent back into a state and a picture. Parameter counts per module appear in Figure~\ref{fig:efficiency}a.}
+\label{fig:arch}
+\end{figure}
+
+\paragraph{Architecture.} Figure~\ref{fig:arch} shows the full model. We keep the encoder of a small VLA and add three modules: the latent dynamics $f_\theta$, a linear readout $R$ and an image decoder $D$. A linear readout makes the latent interpretable by construction: if position and velocity are linear functions of $z$, the rows of $R$ say which directions encode them. The image encoder ends in a spatial softmax, which turns each of 16 feature maps into an $(x, y)$ keypoint we can draw.
+
+\paragraph{One training step.} We sample windows of $H$ steps from one episode, encode only the first observation, and roll the dynamics forward with the actions that were actually taken (Figure~\ref{fig:train}). The loss is
+\begin{equation}
+\mathcal{L} = \mathcal{L}_{\text{act}} + w_s\,\mathcal{L}_{\text{state}} + w_i\,\mathcal{L}_{\text{image}} + w_z\,\frac1H\sum_{k=1}^{H}\big\|\hat z_{t+k}-\mathrm{sg}[\mathrm{enc}(o_{t+k})]\big\|^2 ,
+\label{eq:loss}
+\end{equation}
+where the state and image terms compare readouts of the encoded and imagined latents with the true current and future states and frames, and $\mathrm{sg}$ stops gradients through the targets. We use $w_s=0.5$, $w_i=w_z=1$ and $H=5$. Removing every term except $\mathcal{L}_{\text{act}}$ gives the VLA baseline, with identical encoders.
+
+\begin{figure}[!htbp]
+\centering
+\begin{tikzpicture}[node distance=2.5mm and 3.8mm]
+  \node[box, text width=2.1cm] (win) {sample window\\$o_t,\ a_{t:t+H-1}$\\$o_{t+1:t+H}$};
+  \node[box, right=of win] (enc) {encode $o_t$\\$\rightarrow z_t$};
+  \node[ours, right=of enc] (roll) {roll out $f_\theta$\\with real $a_{t:t+H-1}$};
+  \node[box, right=of roll] (read) {read out\\$R(\hat z),\ D(\hat z)$};
+  \node[box, right=of read, text width=1.6cm] (loss) {sum losses\\Eq.~\eqref{eq:loss}};
+  \draw[flow] (win) -- (enc); \draw[flow] (enc) -- (roll); \draw[flow] (roll) -- (read); \draw[flow] (read) -- (loss);
+  \node[box, below=4mm of roll] (tgt) {encode $o_{t+1:t+H}$ (no gradient)};
+  \draw[flow] (win.south) |- (tgt.west);
+  \draw[flow] (tgt.east) -| node[lbl, pos=0.25, below] {latent targets} (loss.south);
+  \node[box, above=4mm of enc] (pol) {action loss on expert steps only};
+  \draw[flow] (enc.north) -- (pol.south);
+  \draw[flow] (pol.east) -| (loss.north);
+\end{tikzpicture}
+\caption{\textbf{One training step.} A window of $H=5$ transitions is drawn from a single episode. Only the first frame is encoded with gradients. The dynamics then imagines the next $H$ latents from the recorded actions, without seeing $o_{t+1}, \dots, o_{t+H}$. Readouts of the imagined latents are compared with the true future states and frames, and the imagined latents are pulled toward stop-gradient encodings of the real future (latent consistency). The policy imitates only expert actions, while the world model learns from every transition, including random-action bursts. All data sits on the GPU as tensors, so a batch is built by indexing rather than by a per-sample loader.}
+\label{fig:train}
+\end{figure}
+
+\paragraph{A toy world built for checking.} We train on a 2D point mass with momentum ($v_{t+1}=0.8v_t+0.01a_t$) and two goals; the instruction names the goal (Figure~\ref{fig:toy}). The six-number state is fully known, a true simulator answers counterfactual questions, and 400 episodes collect in seconds. Velocity never appears in an image, so a single frame cannot reveal it. A PD expert provides demonstrations, and short bursts of random actions are mixed in. We tag every transition, so the policy imitates only the expert while the world model learns from everything.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics{\figpath/fig-toy-world.pdf}
+\caption{\textbf{The toy world.} (a) Frames rendered by the environment during one expert episode. A red point mass must reach the goal named in the instruction; the other square is a distractor that appears only in the image. Momentum makes velocity part of the state, but no single frame shows it. (b) Actions in one training episode. At each step the collector starts, with probability 0.3, a burst of 1--3 uniformly random actions (shaded); all other actions come from the expert. The bursts teach the world model what actions do; the policy loss ignores them.}
+\label{fig:toy}
+\end{figure}
+
+\paragraph{Protocol.} Each configuration runs three times, each with its own data, split and initialization. We report mean $\pm$ standard deviation across runs and show each run as a dot. Imagination is evaluated on held-out episodes: we encode one frame, roll the dynamics forward, read out the state and compare it with the truth. For \emph{factual} error we use the recorded actions. For \emph{counterfactual} error we use random action sequences and compare with the simulator.
+
+% =====================================================================
+\section{What worked, and what did not}
+\label{sec:lessons}
+
+Table~\ref{tab:lessons} summarizes every design decision we tested. The figures that follow show the most informative ones.
+
+\begin{table}[!htbp]
+\centering\footnotesize
+\begin{tabularx}{\linewidth}{>{\hsize=0.7\hsize}L >{\hsize=1.0\hsize}L >{\hsize=1.5\hsize}L >{\hsize=0.8\hsize}L}
+\toprule
+Decision & What we tried & Outcome & Verdict \\
+\midrule
+Training data & expert only vs.\ 30\% random bursts & counterfactual error at $k{=}10$ falls from $0.112$ to $0.0072$, even though factual error is lower with expert-only data (Fig.~\ref{fig:coverage}) & \textbf{worked}: diverse actions \\
+Imagination horizon $H$ & 1, 5, 10 steps & 10-step counterfactual error $0.0139$, $0.0072$, $0.0057$; one-step error $0.0019$, $0.0019$, $0.0030$ & \textbf{trade-off}: train for the horizon you use \\
+Latent consistency & on vs.\ off & 15-step error $0.0071\pm0.0004$ vs.\ $0.0096\pm0.0024$; one-step error slightly better without it & \textbf{worked}: stability \\
+Image loss & on vs.\ off (state input) & 15-step state error $0.0071$ vs.\ $0.0074$; no measurable effect & \textbf{not needed} with state input \\
+Decoder output & sigmoid vs.\ residual on the mean image & sigmoid stalled below the mean-image baseline; residual learns, yet imagined frames stay worse than copying the frame (Fig.~\ref{fig:imagine}c) & \textbf{partly}: pixels remain weak \\
+Image encoder & global pooling vs.\ spatial-softmax keypoints & with state input the keypoints barely move; without it they track the agent ($R^2 \ge 0.998$) (Fig.~\ref{fig:keypoints}) & \textbf{worked} only without state input \\
+Diffusion head & linear schedule ($\bar\alpha_T \approx 0.92$) vs.\ cosine ($\bar\alpha_T \approx 10^{-5}$) & the linear schedule never reaches noise, yet sampling starts from noise; fixed with a cosine schedule and the DDPM posterior & \textbf{bug fixed} \\
+Auxiliary supervision & BC, + current state, + future state (pixel input) & success $17.0\%$, $28.4\%$, $33.6\%$; most of the gain comes from current-state supervision (Fig.~\ref{fig:policy}c) & \textbf{mostly state supervision} \\
+Few demonstrations & 25 to 400 episodes & WAM trails VLA at 25 episodes ($87\%$ vs.\ $99.7\%$); matched updates close most of the gap & \textbf{undertraining} \\
+\bottomrule
+\end{tabularx}
+\caption{\textbf{Design decisions we tested and what happened.} Errors are normalized state MSE on held-out episodes (lower is better); success is closed-loop success on 100 unseen episodes per run. Values are means over three independent runs; the supervision pilot uses five. ``Factual'' rollouts use the recorded actions; ``counterfactual'' rollouts use random actions checked against the true simulator.}
+\label{tab:lessons}
+\end{table}
+
+\paragraph{The latent world model imagines states well, pixels poorly.} Fifteen steps into an open-loop rollout, state error is $0.0071 \pm 0.0004$, about $80\times$ below persistence; under random actions the 10-step error is $0.0072$, versus $0.388$ for ignoring the action (Figure~\ref{fig:imagine}). The decoded frames tell a different story: they stay worse than simply copying the current frame at every horizon. Figure~\ref{fig:strip} shows why: the decoder draws the agent and the instructed goal but loses the distractor.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics{\figpath/fig-imagination-quality.pdf}
+\caption{\textbf{Imagined states are accurate and action-aware; imagined pixels are not.} (a) Factual state error versus horizon for mini-WAM and a ``nothing changes'' baseline that repeats the current state. (b) Counterfactual error under random action sequences, compared against the simulator, versus a reference that ignores the actions. (c) Pixel MSE of decoded imagined frames versus copying the current frame, which is a strong baseline because most pixels are static background. Lines are means and bands one standard deviation over three runs; 40 held-out episodes per run.}
+\label{fig:imagine}
+\end{figure}
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics{\figpath/fig-episode-strip.pdf}
+\caption{\textbf{One held-out episode through the model's eyes.} Rows show the real frames, the decoding of each real frame's latent, an open-loop imagination from $t=0$ with the recorded actions (the model never sees frames $1$--$28$), and a ``dream'' in which the model's own policy chooses the actions inside its imagination. The agent's trajectory survives 28 imagined steps; the distractor goal does not survive decoding at all.}
+\label{fig:strip}
+\end{figure}
+
+\paragraph{Expert-only data hides action effects.} Trained on expert demonstrations alone, the world model predicts recorded trajectories \emph{better} than with exploration, yet its counterfactual error is $15\times$ worse (Figure~\ref{fig:coverage}). In expert data the action follows from the state, so a network can fit the future without reading its action input, a world-model form of causal confusion \citep{dehaan2019causal}. The data still identifies the dynamics: an affine model of state and action, given the known clipping rule, fits the transition to numerical precision from deterministic expert trajectories alone. The failure therefore lies in what the neural model learns, not in what the data contains. A few random bursts fix it.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics{\figpath/fig-exploration.pdf}
+\caption{\textbf{Factual accuracy does not imply that the model understands actions.} (a) State error after 10 imagined steps as the share of random-action bursts in the data grows. With expert-only data the factual error (green, recorded actions) is lowest, while the counterfactual error (red, random actions checked against the simulator) is $15\times$ higher than with 30\% bursts. Grey: the error of ignoring the actions. (b) Closed-loop success is unaffected because the policy imitates only expert steps. Dots are individual runs; bars are one standard deviation over three runs. Exploration conditions also change trajectory distributions, so this is a comparison of datasets rather than a controlled causal estimate.}
 \label{fig:coverage}
 \end{figure}
 
-The expert-only condition has a 15-step factual NMSE of $0.00469\pm0.00249$, lower on average than the standard exploratory condition. Its 10-step counterfactual NMSE is $0.11209\pm0.00499$, compared with $0.00718\pm0.00053$ at burst probability 0.3 (Figure~\ref{fig:coverage}). The latter ratio is approximately 15.6. A probability of 0.6 gives $0.00633\pm0.00229$ counterfactual error, with no corresponding improvement in factual error.
+\paragraph{The model extrapolates, imperfectly.} Asked to push in one direction for 15 steps, far longer than any training burst, mini-WAM moves the agent the right way but stops short (Figure~\ref{fig:whatif}). Its endpoint error is $0.103 \pm 0.010$ arena units, against $0.457$ for a prediction that ignores the push.
 
-These results are consistent with a neural predictor relying too heavily on regularities of the behavior policy. They do not directly show that it ignores its action input: that claim would require action swaps, input ablation, or measured action sensitivity at fixed states. Nor do the results imply that expert data necessarily lacks enough information to identify the transition law. The affine experiment below provides a counterexample within this environment.
-
-\subsection{Longer training horizons change long-range error}
-\begin{table}[t]
-\centering\small
-\begin{tabular}{lrrr}
-\toprule
-Configuration & Factual $k=1$ & Factual $k=15$ & Counterfactual $k=10$\\
-\midrule
-Standard & .00188 & .00712 & .00718\\
-One-step training & .00185 & .01100 & .01389\\
-Ten-step training & .00295 & .00459 & .00569\\
-No latent loss & .00164 & .00958 & .00698\\
-No image loss & .00203 & .00743 & .00779\\
-\bottomrule
-\end{tabular}
-\caption{Archived mean state NMSE across three runs. Factual errors average six dimensions; counterfactual errors average four. The table describes this configuration sweep, without significance or equivalence claims.}
-\label{tab:ablation}
-\end{table}
-
-Ten-step training reduces the observed 15-step error while increasing one-step error (Table~\ref{tab:ablation}). Removing latent consistency increases the mean long-horizon factual error, but the counterfactual mean changes little. Removing image loss gives a similar mean to the standard condition, with a wider across-run spread at horizon 15: $0.00211$ versus $0.00038$. Three runs do not establish equivalence, and these measurements do not prove that either loss is unnecessary in a visual task. Here the encoder already receives the physical state.
-
-\subsection{Decoded images reveal a different failure}
-\begin{figure}[t]
+\begin{figure}[!htbp]
 \centering
-\includegraphics[width=\linewidth]{\figpath/research-observations.pdf}
-\caption{An archived held-out episode: observed frames, reconstructions from each current observation, and open-loop predictions conditioned on recorded actions. Rows use the same saved timestamps. The predicted row starts from one encoded observation; it does not receive the later frames. The imperfect rendering is retained as evidence rather than replaced with an idealized scene. This single episode is illustrative, not an aggregate image-quality result.}
-\label{fig:images}
+\includegraphics{\figpath/fig-what-if.pdf}
+\caption{\textbf{``What if I pushed this way?''} (a) From one held-out start, imagined (dashed) and simulated (solid) trajectories under 15 steps of constant force in eight directions and no force. (b) Decoded imagined frames after 15 steps, arranged by push direction. (c) Endpoint error of the imagined agent position, averaged over the first frame of all 40 held-out episodes per run; bars are means and whiskers one standard deviation over three runs. Grey bars show the error of predicting the no-push endpoint for every push.}
+\label{fig:whatif}
 \end{figure}
 
-The image decoder performs worse than persistence at every reported evaluation horizon. At one step its pixel MSE is $0.00642$, versus $0.00105$ for copying the current image. At 15 steps the values are $0.00730$ and $0.00500$. Figure~\ref{fig:images} shows the mismatch between recognizable scene structure and incomplete reconstructions.
+\paragraph{Keypoints learn to look only when they must.} With the state as input, the 16 spatial-softmax keypoints sit almost still near the image center. When the state is removed, they lock onto the agent and the goals (Figure~\ref{fig:keypoints}). An encoder learns to localize only when nothing else tells the network where things are.
 
-A largely static background makes copying a strong pixel baseline. Small moving objects occupy relatively few pixels, so whole-image MSE also underweights their importance. These facts explain why image error and control relevance may disagree, but they do not excuse a failed comparison. The current decoder cannot support a claim of accurate visual imagination. Object-position error, goal retention, and foreground-weighted error would provide complementary diagnostics. Whether the decoder loses the distractor because it is irrelevant to control remains a hypothesis; its cause has not been isolated.
+\begin{figure}[!htbp]
+\centering
+\includegraphics{\figpath/fig-keypoints.pdf}
+\caption{\textbf{The image encoder localizes only when it has to.} Spatial-softmax keypoints (crosses, one colour each) on a held-out episode for (a) a model that also receives the state, where the keypoints barely move, and (b) a model that receives only the image, where they follow the agent and mark both goals. (c) Spread of keypoint positions over held-out episodes on a log scale; bars are geometric means, dots individual runs. The best keypoint tracks the agent with $R^2 \ge 0.998$ in every image-only run.}
+\label{fig:keypoints}
+\end{figure}
 
-\subsection{Policy improvement depends on the input regime}
-\begin{table}[t]
-\centering\small
-\begin{tabular}{lrr}
-\toprule
-Condition & WAM success (\%) & BC success (\%)\\
-\midrule
-400 episodes, state input & $100.0\pm0.0$ & $100.0\pm0.0$\\
-25 episodes, 15 epochs & $87.0\pm7.8$ & $99.7\pm0.5$\\
-25 episodes, 225 epochs & $96.3\pm1.2$ & $98.7\pm1.9$\\
-400 episodes, pixel input & $80.3\pm12.0$ & $36.0\pm19.8$\\
-\bottomrule
-\end{tabular}
-\caption{Archived closed-loop success: mean and population standard deviation across three runs, each evaluated on 100 episodes. The longer 25-episode run approximately matches the standard update budget; it does not match total computation between architectures. BC denotes the repository's VLA comparator.}
-\label{tab:policy}
-\end{table}
+\paragraph{When prediction helps the policy.} With the state as input, the WAM never meaningfully beats the VLA, and with 25 demonstrations it trails until training gets more updates (Figure~\ref{fig:policy}a). With pixels only, the WAM wins every run, $80.3\pm12.0\%$ versus $36.0\pm19.8\%$ (Figure~\ref{fig:policy}b). A matched pilot separates the ingredients: supervising the current state lifts behavioral cloning from $17.0\%$ to $28.4\%$, and adding future-state prediction reaches $33.6\%$ (Figure~\ref{fig:policy}c). Most of the gain is state supervision; predicting the future adds a smaller, less consistent benefit.
 
-With state inputs, both policies succeed on all 300 evaluation episodes in the standard condition. This is a ceiling effect, not evidence that their behavior is identical. With 25 collection episodes and 15 epochs, auxiliary prediction coincides with worse control. Training for 225 epochs narrows the gap substantially (Table~\ref{tab:policy}), making optimization budget a plausible contributor to the short-run deficit. It does not establish the remaining gap's cause.
+\begin{figure}[!htbp]
+\centering
+\includegraphics{\figpath/fig-policy.pdf}
+\caption{\textbf{Prediction pays off when the observation hides the state.} (a) Closed-loop success versus the number of demonstrations, 15 epochs each; open markers train the 25-episode datasets for 225 epochs to match the update count of the 400-episode runs. (b) Success with state and image input versus image input only (400 episodes); dots are individual runs. (c) A matched pixel-input pilot with identical data, initialization, batches and update counts: behavioral cloning alone, plus current-state supervision, plus five-step future-state prediction. Grey lines connect the conditions of each of five runs; orange shows mean $\pm$ sample SD. Panels (a, b) use three runs and the full WAM objective; (c) excludes pixel and latent-consistency losses.}
+\label{fig:policy}
+\end{figure}
 
-The pixel-input result is more interesting. The WAM outperforms BC in each of the three runs, by 44.3 percentage points on average, but the paired differences range from 5 to 74 points. This is a promising observation with substantial variability, not a stable estimate of a general world-model benefit.
+% =====================================================================
+\section{Where the cost goes}
+\label{sec:efficiency}
 
-Most importantly, WAM has supervised state targets that BC lacks. A policy trained with current-state reconstruction alone could benefit from the same localization signal without learning transitions. Future-state supervision, image reconstruction, latent consistency, and changes in the usable training windows are also entangled. The fresh pilot in Section~\ref{sec:pilot} begins to separate these effects. The archived comparison alone cannot establish that learned dynamics is the cause.
+Figure~\ref{fig:efficiency} profiles the trained model. Acting costs the same for WAM and VLA, 0.42\,ms per step, because the deployed policy never calls the dynamics. Training is a different story. One WAM step costs $38\times$ a VLA step, and the image decoder accounts for most of it: removing it cuts the step from 2.55\,s to 0.27\,s and halves the parameters. Imagination itself is cheap. Ten latent steps with state readouts take 0.28\,ms; decoding a frame at every step raises that to 12.7\,ms. Three changes made mini-WAM fast enough to run 12 three-run experiments in an afternoon: predict states rather than pixels where possible, keep the dataset on the GPU and index batches instead of looping over samples (4.5\,ms to 2.6\,ms per batch even on a CPU), and roll out in latent space.
 
-\section{Fresh simulator and system-identification audit}
-\label{sec:audit}
-To test whether the neural results reflect intrinsic task difficulty, we implemented a separate CPU experiment with five independent runs. It fits an affine transition predictor from state and action and compares it with an affine predictor that does not receive action. Each collection condition uses 60 training episodes and a separate bank of 20 held-out episodes, with a 60-step cap. Counterfactual tests branch from up to 512 held-out states per run under ten independent uniform actions. Both predictors use privileged state. These are diagnostic baselines for the transition problem, not alternatives to a visual encoder or a complete policy.
+\begin{figure}[!htbp]
+\centering
+\includegraphics{\figpath/fig-efficiency.pdf}
+\caption{\textbf{Pixels dominate the cost of a small WAM.} (a) Parameters per module for the VLA baseline, a WAM that predicts only states, and the full WAM; the image decoder holds half of the full model. (b) Wall time of one optimizer step at batch size 64 (log scale). Dropping the decoder makes a WAM step $9.5\times$ cheaper. (c) Latency of imagining $k$ steps from one observation, reading out states only or also decoding every frame, compared with the cost of one policy action (dashed). Medians of repeated calls on one CPU thread of an Apple-silicon laptop; the numbers compare components with each other, not hardware.}
+\label{fig:efficiency}
+\end{figure}
 
-\subsection{A structured baseline recovers the dynamics}
-The action-conditioned predictor fits a state increment from training-standardized features $[s_t,a_t,1]$ and adds it to $s_t$. Its position outputs are clipped to the arena after each recursive step, matching the known boundary rule. The action-free comparator uses $[s_t,1]$. Fitting uses training trajectories only, while factual and randomized-action evaluation use separate states. All collection conditions share the evaluation bank within a run. Errors are reported separately for position and normalized velocity in raw coordinates, avoiding condition-specific NMSE denominators.
+% =====================================================================
+\section{Limitations}
 
-Even deterministic expert data yields a full-rank action-conditioned design matrix in all five runs. The matrix has nine columns and rank nine, with condition numbers between approximately 13.5 and 16.2. The fitted action-conditioned model's 10-step counterfactual position MSE is about $4.3\times10^{-16}$, near the numerical floor of this test. The action-free model has much larger counterfactual position error, about $9.9\times10^{-3}$ at ten steps. Its one-step factual position MSE is about $2.1\times10^{-6}$.
+mini-WAM is a teaching and research instrument, not a robot controller. The toy world is fully observed when the state is given, its dynamics are affine away from the walls, and its goal coordinates appear in the state. The policy never uses imagination at test time, so none of our results measure planning. In the pixel-input setting the WAM receives privileged state targets during training, and a history-based baseline is still missing; velocity is hidden in a single frame, and a short frame history may close much of the gap. Our studies use three runs per configuration and five in the pilot, which is enough to see large effects but not small ones.
 
-This result changes the interpretation of the archived experiment. The neural model may benefit from exploratory trajectories, but the deterministic expert trajectories already identify the transition within this restricted model class. The clipped expert is piecewise affine, and variation across its operating regions can break the linear dependence that would arise from a single unconstrained linear feedback rule. The observed full rank is empirical evidence for these sampled datasets, not a theorem about every expert policy.
+\section{Conclusion}
 
-The affine model is favored by correct structural assumptions, full-state access, and the known clipping operation. Its numerical error must not be ranked directly against archived neural NMSE: the datasets, scales, and protocols differ. Its role is to establish that a matched structured baseline is necessary before calling this environment a demanding world-model benchmark.
+A WAM is a VLA with a learned simulator that shares its representation. Built from scratch at 0.75M parameters, that simulator imagines accurately, reads out linearly and responds to actions, provided the data contains actions worth responding to. Our experiments point to three practical rules. Collect diverse actions for the world model, even while the policy imitates the expert. Expect prediction to help the policy when the observation hides the state, and test whether plain state supervision explains the gain. Predict compact states or latents before pixels, which is where most of the cost lies. The large open WAMs in Table~\ref{tab:wams} make the same choices at a scale where they are expensive to test; mini-WAM makes them cheap to test.
 
-\subsection{Observation ambiguity persists under imagination}
-A paired simulator check holds agent position and both goals fixed, then assigns opposite velocities. The images are bit-identical, while applying the same action produces different next positions. A second check compares the environment's step function with its counterfactual simulator across 50 starts and 20 steps; they agree exactly after aligning the float32 starting state. These tests validate the intended observation ambiguity and transition oracle.
-
-For an interior trajectory, two possible initial normalized velocities under identical subsequent controls satisfy
-\begin{equation}
- \Delta u_{t+k}=0.8^k\Delta u_t.
-\end{equation}
-Thus uncertainty about initial velocity decays without any new observation. After five steps its squared contribution is scaled by $0.8^{10}\approx0.107$. A better future-velocity readout can therefore result from damping and known action inputs; it need not mean the model inferred the hidden initial velocity. In the archived offline test, those inputs are the recorded future actions, which also carry information about the expert's behavior.
-
-This matters for the earlier pixel-input interpretation. The deployed policy re-encodes one frame each step and does not use these imagined latents. Improved future readout accuracy cannot by itself explain improved deployed control. Establishing that mechanism requires history-based controls, auxiliary-supervision controls, and evaluation on deliberately ambiguous scenes.
-
-\section{A matched supervision pilot on Explorer}
-\label{sec:pilot}
-We next trained three pixel-input conditions on Northeastern's Explorer cluster: behavioral cloning alone, cloning with current-state prediction, and cloning with current and five-step future-state prediction. Each of five independent runs collects 200 episodes at burst probability 0.3, holds out 10\% by episode, and trains for 15 epochs. All conditions use identical five-step training starts, expert masks, encoder and policy initialization, minibatch order, and update counts within a run. Current and future state losses each have weight 0.5. Pixel reconstruction and latent consistency are excluded, so this is a targeted supervision experiment rather than a replication of the full archived WAM.
-
-\begin{table}[t]
-\centering\small
-\begin{tabular}{lrr}
-\toprule
-Supervision & Mean $\pm$ SD & Range\\
-\midrule
-Actions only & $17.0\pm10.1$ & 0--27\\
-+ Current state & $28.4\pm5.5$ & 24--38\\
-+ Future state & $33.6\pm2.5$ & 30--36\\
-\bottomrule
-\end{tabular}
-\caption{Fresh Explorer pilot: success percentages on 100 paired evaluation episodes per training run. The last row includes current-state supervision. SD is the sample standard deviation over five runs, unlike the population SD in the archived tables.}
-\label{tab:pilot}
-\end{table}
-
-Current-state supervision improves the mean by 11.4 percentage points over cloning. Adding future-state prediction gives a further 5.2 points on average; the paired difference is positive in four of five runs and ranges from $-2$ to 9 points (Table~\ref{tab:pilot}). Thus current-state supervision accounts for a substantial part of the gain in this pilot, while future prediction adds a smaller, non-uniform benefit. The result is more informative than comparing the full auxiliary objective only against cloning.
-
-Absolute success remains low, and this pilot uses half the archived collection budget. It neither establishes convergence nor explains the magnitude of the archived 44.3-point gap. It also lacks a history baseline and a state-free training objective. These measurements justify a larger, preregistered mechanism study; they do not yet establish a general advantage for learned dynamics. Per-episode outcomes, dataset hashes, source hashes, and configuration manifests are retained for all 15 trained models. The models act reactively throughout evaluation.
-
-\section{What would establish a stronger research claim?}
-The most useful next question is narrower than whether world models are helpful: under what observation and data-coverage conditions does auxiliary transition prediction improve control beyond equally supervised state estimation? A second question is whether decision-relevant counterfactual tests predict planning performance better than average state error. The pilot provides preliminary evidence for the first question; the second still requires a planning experiment.
-
-A controlled study should first equalize policy training starts, expert-action labels, update counts, and evaluation episodes. It should compare BC with current-state supervision, one-step future-state supervision, and multistep prediction, both with and without privileged training targets. A short-history policy is essential because velocity ambiguity is introduced by the observation design. Parameter and wall-clock budgets should be reported alongside environment transitions.
-
-Action coverage should then be varied with a fixed evaluation bank and a common metric scale. Holding out candidate actions at matched states separates action generalization from a change in the state distribution. Action-shuffled training and action-free predictors test whether transitions actually depend on the supplied controls. Affine identification, a nonlinear state-space model, and oracle dynamics bound the interpretation of latent-model results.
-
-Finally, the model must influence decisions if the claim concerns planning. A common receding-horizon planner should use learned and oracle models under the same candidate budget and cost. Report control success, cost regret relative to the oracle candidate, model-call count, and latency. A predictor that reduces average error but ranks the useful candidates incorrectly is not an improved controller.
-
-The point-mass task should remain a diagnostic setting. A publication-level robotics claim needs contact-rich or partially observed tasks with a reason for prediction to matter, multiple dynamics regimes, and comparisons to contemporary methods. A separate research plan accompanying the source specifies these experiments and their decision gates. They are proposed work, not completed results in this paper.
-
-\section{Limitations and conclusion}
-The study is limited by a single low-dimensional simulator, three archived neural runs, five fresh pilot runs, and incomplete original training provenance. The state-input task leaks goal identity through the selected target coordinates. The pixel-input task uses privileged supervision and lacks a memory baseline. The linear readout is jointly supervised, the image decoder underperforms persistence, and the forward model is not used for deployed planning. These are restrictions on what the results establish, not details that a change in writing style can remove.
-
-Within that scope, mini-WAM is useful as an experimental instrument. It exposes a gap between factual and counterfactual prediction, a separation between state and image quality, and a possible benefit from auxiliary supervision under restricted observations. The fresh affine audit also supplies an instructive negative result: the neural counterfactual failure is not inevitable for the available expert data. A research contribution should explain these differences through controlled experiments. The current evidence supports that investigation, but not a claim that a new world-action method has already improved robotic decision-making.
-
-\paragraph{Reproducibility and provenance.}
-Archived measurements and figure arrays are retained under \texttt{docs/results/}; the new simulator audit records its full configuration, software versions, and source hashes separately. Environment images are actual renders, and neural reconstructions are preserved from the archived arrays. The accompanying research plan distinguishes completed diagnostics from planned training and robotics experiments. The source repository is \url{https://github.com/keivalya/mini-wam}.
+\paragraph{Reproducibility.} Every figure is regenerated from committed result files by \code{docs/figures/make\_figures.py}; every experiment is \code{scripts/run\_toy.sh} with one configuration line changed. Code: \url{https://github.com/keivalya/mini-wam}.
 
 \paragraph{Assistance disclosure.}
 AI assistance was used to audit code, develop diagnostic experiments, check literature and venue information, and revise this manuscript. The results presented as fresh measurements were executed; archived results are labeled as such. Author review of the scientific claims and submission-specific disclosure remains necessary.
 
-\begin{thebibliography}{9}
-\bibitem[Alain and Bengio(2016)]{alain2016} G. Alain and Y. Bengio. Understanding intermediate layers using linear classifier probes. arXiv:1610.01644, 2016.
-\bibitem[Chen et~al.(2026)]{chen2026} J. Chen et al. MiniWAM: Learning compact future targets for efficient world-action modeling. arXiv:2610.12194, 2026. \url{https://arxiv.org/abs/2610.12194}.
-\bibitem[de Haan et~al.(2019)]{dehaan2019} P. de Haan, D. Jayaraman, and S. Levine. Causal confusion in imitation learning. NeurIPS, 2019. \url{https://arxiv.org/abs/1905.11979}.
-\bibitem[Ha and Schmidhuber(2018)]{ha2018} D. Ha and J. Schmidhuber. Recurrent world models facilitate policy evolution. NeurIPS, 2018. \url{https://arxiv.org/abs/1809.01999}.
-\bibitem[Hafner et~al.(2020)]{hafner2020} D. Hafner, T. Lillicrap, J. Ba, and M. Norouzi. Dream to control: Learning behaviors by latent imagination. ICLR, 2020. \url{https://arxiv.org/abs/1912.01603}.
-\bibitem[Hansen et~al.(2024)]{hansen2024} N. Hansen, H. Su, and X. Wang. TD-MPC2: Scalable, robust world models for continuous control. ICLR, 2024. \url{https://arxiv.org/abs/2310.16828}.
-\bibitem[Qiu et~al.(2026)]{qiu2026} J. Qiu, Z. Chen, H. Cao, J. Shi, J. Huo, and Y. Gao. AD-WM: Action-discriminative world models for counterfactual model predictive control. arXiv:2609.30264, 2026. \url{https://arxiv.org/abs/2609.30264}.
-\bibitem[Zhu et~al.(2025)]{zhu2025} C. Zhu et al. Unified world models: Coupling video and action diffusion for pretraining on large robotic datasets. Robotics: Science and Systems, 2025. \url{https://doi.org/10.15607/RSS.2025.XXI.015}.
+{\small
+\begin{thebibliography}{19}
+\bibitem[Assran et~al.(2025)]{assran2025vjepa2} M. Assran, A. Bardes, D. Fan, et al. V-JEPA 2: Self-supervised video models enable understanding, prediction and planning. arXiv:2506.09985, 2025.
+\bibitem[Cen et~al.(2025)]{cen2025worldvla} J. Cen, C. Yu, H. Yuan, et al. WorldVLA: Towards autoregressive action world model. arXiv:2506.21539, 2025.
+\bibitem[Chen et~al.(2026)]{chen2026miniwam} J. Chen et al. MiniWAM: Learning compact future targets for efficient world-action modeling. arXiv:2610.12194, 2026.
+\bibitem[de Haan et~al.(2019)]{dehaan2019causal} P. de Haan, D. Jayaraman, and S. Levine. Causal confusion in imitation learning. NeurIPS, 2019. arXiv:1905.11979.
+\bibitem[Huang et~al.(2026)]{huang2026nano} S. Huang, P. Kaushik, M. Chen, et al. Nano World Models: A minimalist implementation of future video prediction. arXiv:2605.23993, 2026.
+\bibitem[Jang et~al.(2025)]{jang2025dreamgen} J. Jang, S. Ye, Z. Lin, et al. DreamGen: Unlocking generalization in robot learning through video world models. arXiv:2505.12705, 2025.
+\bibitem[Kim et~al.(2026)]{kim2026cosmospolicy} M. J. Kim, Y. Gao, T.-Y. Lin, et al. Cosmos Policy: Fine-tuning video models for visuomotor control and planning. arXiv:2601.16163, 2026.
+\bibitem[Li et~al.(2026)]{li2026lingbotva} L. Li, Q. Zhang, Y. Luo, et al. Causal world modeling for robot control (LingBot-VA). arXiv:2601.21998, 2026.
+\bibitem[Liao et~al.(2025)]{liao2025genie} Y. Liao, P. Zhou, S. Huang, et al. Genie Envisioner: A unified world foundation platform for robotic manipulation. arXiv:2508.05635, 2025.
+\bibitem[Lu et~al.(2026)]{lu2026survey} Z. Lu, H. Zhai, et al. World-action models for robot learning and control: A survey. arXiv:2609.16074, 2026.
+\bibitem[Shen et~al.(2026)]{shen2026survey} Q. Shen, S. Zhang, Y. Liao, et al. World action models: A survey. arXiv:2606.20781, 2026.
+\bibitem[Wu et~al.(2023)]{wu2023gr1} H. Wu, Y. Jing, C. Cheang, et al. Unleashing large-scale video generative pre-training for visual robot manipulation (GR-1). arXiv:2312.13139, 2023.
+\bibitem[Zhang et~al.(2026)]{zhang2026tutorial} X. Zhang, X. Zeng, and W. Zhang. From world models to world action models: A concise tutorial for robotics. arXiv:2607.00836, 2026.
+\bibitem[Zhu et~al.(2025)]{zhu2025uwm} C. Zhu, R. Yu, S. Feng, et al. Unified world models: Coupling video and action diffusion for pretraining on large robotic datasets. RSS, 2025. doi:10.15607/RSS.2025.XXI.015.
 \end{thebibliography}
+}
 \end{document}
