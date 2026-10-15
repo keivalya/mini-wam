@@ -1,432 +1,520 @@
-> **Archived tutorial draft.** This text is retained for historical context and contains interpretations superseded by the [revised research paper](paper/mini-wam-paper.pdf), especially the hidden-velocity explanation. Use the [LaTeX source](paper/mini-wam-paper.tex) and [research plan](paper/RESEARCH_PLAN.md) for current claims.
+# Building a World Action Model from Scratch
 
-# mini-WAM: Building a World Action Model from Scratch
+### A hands-on tutorial with mini-WAM
 
 **Keivalya Pandya**, Northeastern University
 
-*A tutorial written as a research paper. Code: this repository.*
+*This is the long, friendly version of the [mini-WAM paper (PDF)](paper/mini-wam-paper.pdf). Same experiments, same numbers, a lot more explanation. Code: this repository.*
 
 ---
 
-## Abstract
+## How to read this
 
-Vision-Language-Action models (VLAs) map an image, an instruction and the robot state to an action. They learn *what to do*, but nothing in their training asks them *what will happen* when they do it. World Action Models (WAMs) add that second question: the same network that picks the action must also predict the next state of the world.
+I wrote this for three kinds of readers, and you can skip around:
 
-In this paper I build the smallest WAM I could make that still behaves like one, called **mini-WAM**. It starts from a small VLA (image, language and state encoders with an action head) and adds three things: an action-conditioned latent dynamics model, a *linear* readout that turns any latent back into a physical state, and an image decoder that turns it back into a picture. Everything (the policy, the dynamics and the readouts) runs on one shared latent vector, so the model can "imagine" many steps ahead and we can *look at* what it imagines.
-
-I train mini-WAM on a toy 2D world that runs on a laptop, and study it the way you would study a real model: three runs per experiment, held-out episodes, and a counterfactual test against the true simulator. Four findings stand out. (1) The latent world model imagines 15 steps ahead with about 80× less state error than assuming nothing changes, and every imagined latent is linearly readable. (2) Trained on expert demonstrations alone, it predicts what happened *better* but understands other actions 15× *worse*; a few random-action bursts in the data fix this. (3) The training horizon trades short-range for long-range accuracy, while the latent-consistency and pixel losses matter little here. (4) The world-model objective does not help the policy when the state is given, but when the model must work from pixels alone it more than doubles closed-loop success (80% vs. 36%). The probe shows why: imagination recovers the velocity a single frame cannot show.
-
-All of mini-WAM is about 1,000 lines of PyTorch. The point is not state-of-the-art numbers. The point is that you can read every line, change one thing, and see what the world model learned.
-
----
-
-## 1. Introduction
-
-If you have trained a VLA, you know the recipe: encode the image, encode the instruction, encode the robot state, fuse them, and regress (or diffuse) an action.
-
-```text
-VLA:        image_t + language + state_t → action_t
-```
-
-That recipe works surprisingly well, but it is *reactive*. A recent survey of World Action Models puts it like this:
-
-> "Despite this progress, most VLA policies remain primarily reactive. They are typically trained to map the current observation, a short history, and a task instruction to the next action, without explicitly modeling how alternative actions would change future observations, physical states, or task progress" ([Survey](https://www.alphaxiv.org/abs/2609.16074))
-
-A World Action Model keeps the VLA's job and adds a second one:
-
-```text
-mini-WAM:   image_t + language + state_t → action_t + state_t+1 + image_t+1
-```
-
-The same survey defines WAMs as "predictive control models that connect future-state modeling with executable action generation" ([Survey](https://www.alphaxiv.org/abs/2609.16074)). Today's WAMs are large: video diffusion backbones, billions of parameters, and robot datasets that most of us cannot train on. That makes it hard to build intuition. What does the "world model" part actually learn? When does it help? What breaks?
-
-This paper is my attempt to answer those questions at a scale where you can watch everything happen. My contributions are:
-
-1. **A minimal WAM** (§3). A small VLA plus three small modules: latent dynamics, a linear state readout and an image decoder, all on one shared latent. Each new module is under 100 lines.
-2. **A toy world built for understanding** (§4). A 2D point mass with momentum and two language-selected goals. It steps and renders in a fraction of a millisecond, and its true state is six numbers, so we can check exactly what the latent encodes.
-3. **Tools for looking inside** (§5.5): imagination strips, belief traces, a latent map, "what if" counterfactuals and an error-vs-horizon curve.
-4. **A small but careful study** (§5). Three runs per configuration, held-out episodes, and ablations of the data, the loss terms and the imagination horizon. It also includes the experiment that made me rethink the data: a world model trained only on expert demos *learns to ignore the action*.
-
-> **A note on the name.** While writing this I found an unrelated paper also called *MiniWAM* ([Chen et al., 2026](https://www.alphaxiv.org/abs/2610.12194)). It is a 0.25B-parameter model that predicts compact learned future representations instead of native visual features. This project (mini-WAM, with a hyphen) is an educational from-scratch implementation and is not connected to that work.
-
----
-
-## 2. Background: from VLAs to WAMs
-
-### 2.1 What you already know, and what it becomes in a WAM
-
-Most of a WAM is made of things you have already met somewhere else in robotics or ML. This table is the map I wish I had when I started:
-
-| If you know… | …then in mini-WAM it is | File |
+| If you are… | Start at | You can skip |
 |---|---|---|
-| A VLA's vision/language/state encoders + fusion | the **observation encoder** that produces the latent world state $z_t$ | `models/encoders.py`, `models/fusion.py` |
-| A VLA's action head (MLP, diffusion, flow) | the **policy** $\pi(a_t \mid z_t)$, unchanged | `models/action_heads.py` |
-| A forward model / simulator $s_{t+1}=f(s_t,a_t)$ from controls | the **latent dynamics** $z_{t+1}=f_\theta(z_t,a_t)$, a simulator learned in latent space | `models/dynamics_head.py` |
-| A state estimator / Kalman filter output | the **state readout** $\hat s = W z + b$, which reads the physical state back out of $z$ | `models/dynamics_head.py` |
-| An autoencoder's decoder | the **image decoder**, which renders any latent (real or imagined) as a picture | `models/image_decoder.py` |
-| Rolling out a model in MPC | **imagination**: apply $f_\theta$ repeatedly with a chosen action sequence | `MiniWAMPolicy.imagine` |
-| A linear probe in interpretability ([Alain & Bengio](https://www.alphaxiv.org/abs/1610.01644)) | the readout is *literally* a linear probe, trained jointly | `StateReadout(linear=True)` |
+| **new to robot learning** | [Part 0](#part-0--five-ideas-you-need) (five ideas in plain words) | nothing, read it in order |
+| **comfortable with VLAs / imitation learning** | [Part 1](#part-1--vla-world-model-wam) | Part 0 |
+| **a researcher who wants the results** | [Part 5](#part-5--what-worked-and-what-did-not) and [Part 6](#part-6--where-the-cost-goes) | most of Parts 0–3 |
 
-### 2.2 World models
-
-The idea of learning a model of the world and acting inside it is old in control (system identification, MPC) and in RL (model-based RL). Three lines of work shaped mini-WAM:
-
-* **World Models** ([Ha & Schmidhuber](https://www.alphaxiv.org/abs/1809.01999)) and **Dreamer** ([Hafner et al.](https://www.alphaxiv.org/abs/1912.01603)) learn a compact latent state from pixels and a dynamics model on top of it, then learn behaviour "by latent imagination". mini-WAM's `imagine()` is the same idea in its simplest form.
-* **TD-MPC2** ([Hansen et al.](https://www.alphaxiv.org/abs/2310.16828)) learns a latent dynamics model for continuous control and plans with it. mini-WAM's *latent consistency* loss (the imagined latent should match the encoding of the real future observation) is in the same spirit.
-* **Spatial-softmax keypoints** ([Finn et al.](https://doi.org/10.1109/icra.2016.7487173)) turn conv feature maps into $(x, y)$ coordinates. mini-WAM uses them as its image encoder because global average pooling throws away *where* things are, and a world model needs exactly that.
-
-### 2.3 VLAs
-
-VLAs such as RT-2 ([Brohan et al.](https://doi.org/10.48550/arxiv.2307.15818)), OpenVLA ([Kim et al.](https://www.alphaxiv.org/abs/2406.09246)) and π0 ([Black et al.](https://doi.org/10.15607/rss.2025.xxi.010)) scale the "observation + instruction → action" recipe with large pretrained backbones and large robot datasets. Their action heads (discrete tokens, diffusion ([Chi et al.](https://doi.org/10.15607/rss.2023.xix.026)), flow matching ([Lipman et al.](https://doi.org/10.48550/arxiv.2210.02747))) carry over unchanged to WAMs; mini-WAM implements MLP, diffusion and flow heads.
-
-Interestingly, there is evidence that large VLAs may *already* contain some implicit model of state transitions: Molinari et al. probe OpenVLA's internal activations for future state changes ([Emergent World Representations in OpenVLA](https://www.alphaxiv.org/abs/2509.24559)). A WAM makes that model *explicit*, so it can be trained, tested and used directly.
-
-### 2.4 World Action Models
-
-The survey ([Survey](https://www.alphaxiv.org/abs/2609.16074)) separates two families:
-
-* **Joint prediction:** one model predicts future observations *and* actions, so future prediction acts as extra supervision for the policy. Examples include unified video-action models such as UWM ([Zhu et al.](https://doi.org/10.15607/rss.2025.xxi.015)) and video-pretrained policies such as GR-1 ([Wu et al.](https://doi.org/10.48550/arxiv.2312.13139)).
-* **Plan-then-act:** first predict the future (often as video), then recover the action with an inverse dynamics model. UniPi ([Du et al.](https://doi.org/10.52202/075280-0403)) is an early example.
-
-mini-WAM is a *joint-prediction* WAM, with a twist: its dynamics model is **action-conditioned**, so it can answer "what if" questions about actions it was not shown. That matters, because predicting what actually happened is not the same as understanding actions. In AD-WM, Qiu et al. write that a model "can therefore achieve low factual prediction error yet poorly distinguish candidate actions" ([AD-WM](https://www.alphaxiv.org/abs/2609.30264)). §5.3 shows exactly this failure in a tiny model.
+> **TL;DR.** A World Action Model (WAM) is a robot policy that also learns to predict what its actions will do. I built a tiny one, **mini-WAM** (0.75M parameters, ~1,000 lines of PyTorch), trained it on a toy world where I know the true physics, and poked at it until it told me something. Three things stuck with me:
+> 1. **A world model trained only on expert demos looks great and understands actions badly.** Its predictions of what *did* happen are excellent, but its predictions of what *would* happen under other actions are 15× worse. A few random actions in the data fix it.
+> 2. **Predicting the future helps the policy only when the observation hides something.** With the robot state as input: no gain. With pixels only: success jumps from 36% to 80%. A follow-up experiment says most of that comes from teaching the network the *current* state, not from predicting the future.
+> 3. **Pixels are where the cost is.** The image decoder holds half the parameters and ~90% of the training compute.
 
 ---
 
-## 3. mini-WAM
+## Part 0 — Five ideas you need
 
-### 3.1 Overview
+If you already train robot policies, skip this. If not, these five ideas are all you need for the rest of the tutorial.
+
+**1. A policy** is a function that picks an action. You give it what the robot sees (a camera image), what it knows about itself (its joint angles or position, the *state*), and what you want (an instruction like "go to the blue goal"). It gives back an action, like "push a little to the right".
+
+**2. Imitation learning (behavioral cloning, BC)** is the simplest way to train a policy: record an expert doing the task, then train the network to copy the expert's action in every situation. It is plain supervised learning, inputs to labels. A **VLA** (vision-language-action model) is a policy trained this way that takes images and language as input.
+
+**3. A world model** (or *forward model*) answers a different question: *if I am here and I do this, where will I be next?* Engineers have written these by hand for decades. That's what a physics simulator is, and what model-predictive control (MPC) uses to plan. A *learned* world model learns this from data instead.
+
+**4. A latent** is a compact vector the network uses internally to summarize what it sees. In mini-WAM it is 128 numbers, called $z_t$. You can't read it directly, but you can train small "readout" networks to turn it back into things you understand (positions, velocities, pictures).
+
+**5. Imagination (a rollout)** means applying the world model again and again without looking at the real world: from $z_t$ and an action, predict $z_{t+1}$; from that and the next action, predict $z_{t+2}$; and so on. If the predictions stay good for many steps, the model has learned something real about the world.
+
+That's it. A **WAM** combines idea 1 and idea 3 in one network.
+
+---
+
+## Part 1 — VLA, world model, WAM
 
 ```mermaid
 flowchart LR
-    I[image_t] --> IE[ImageEncoder<br/>spatial-softmax keypoints]
-    L[language] --> TE[TextEncoder<br/>GRU]
-    S[state_t] --> SE[StateEncoder<br/>MLP]
-    IE --> F[Fusion MLP]
-    TE --> F
-    SE --> F
-    F --> Z((z_t<br/>latent world state))
-    Z --> P[ActionHead<br/>mlp / diffusion / flow] --> A[a_t]
-    Z --> R[StateReadout<br/>linear] --> SH[ŝ_t]
-    Z --> D[ImageDecoder] --> IH[î_t]
-    Z --> DYN[LatentDynamics]
-    A -. "real a_t (training)<br/>or any a (imagination)" .-> DYN
-    DYN --> Z1((ẑ_t+1))
-    Z1 --> R2[StateReadout] --> S1[ŝ_t+1]
-    Z1 --> D2[ImageDecoder] --> I1[î_t+1]
-    Z1 --> P2[ActionHead] --> A1[â_t+1 …]
+    subgraph VLA["VLA: act"]
+      o1["image + instruction"] --> p1[policy] --> a1[action]
+    end
+    subgraph WM["World model: predict"]
+      o2["image + action"] --> f2[dynamics] --> s2[next image]
+    end
+    subgraph WAM["WAM: act AND predict"]
+      o3["image + instruction"] --> e3[encoder] --> z3((latent z))
+      z3 --> p3[policy] --> a3[action]
+      z3 --> f3[dynamics]
+      a3 -.-> f3
+      f3 --> z4((next latent)) --> r4["readouts: next state, next image"]
+    end
 ```
 
-*Figure 1. **mini-WAM: everything on one latent.** The observation encoder produces $z_t$. The policy, the state readout and the image decoder read from $z_t$; the latent dynamics moves it forward given an action. Applying the dynamics repeatedly gives imagined latents, which are read out with the same readout and decoder.*
+*Figure 1. A VLA acts, a world model predicts, a WAM does both with a shared latent. The dashed arrow is the key: the dynamics can be fed **any** action, the policy's own or one you make up, so you can ask the model "what would happen if…?".*
 
-The whole design rests on one idea: **everything lives on the same latent $z$.** The policy acts from $z$, the dynamics moves $z$ forward given an action, and the readouts turn *any* $z$, encoded from a real frame or imagined, back into a state and an image. Because the policy also reads $z$, the model can roll its own policy forward without ever touching the environment (the "dream" row in Figure 3).
+A recent survey defines WAMs as models that "connect future-state modeling with executable action generation" ([Lu et al.](https://www.alphaxiv.org/abs/2609.16074)). Another sorts them by the future they produce: pixels, a latent, or nothing at all ([Shen et al.](https://www.alphaxiv.org/abs/2606.20781)).
 
-### 3.2 Observation encoder → latent world state
+Here's the map I wish someone had handed me when I moved from VLAs to WAMs. Almost every part of a WAM is something you've met before under a different name:
 
-This part is a standard small VLA encoder (`models/encoders.py`, `models/fusion.py`, adapted from my earlier [mini-VLA](https://github.com/keivalya/mini-vla) project):
+| If you know… | …in mini-WAM it is | File |
+|---|---|---|
+| a VLA's vision / language / state encoders | the **observation encoder** that produces the latent $z_t$ | `models/encoders.py`, `models/fusion.py` |
+| a VLA's action head (MLP, diffusion, flow) | the **policy** $\pi(a_t \mid z_t)$, unchanged | `models/action_heads.py` |
+| a simulator / forward model in MPC | the **latent dynamics** $z_{t+1} = f_\theta(z_t, a_t)$ | `models/dynamics_head.py` |
+| a state estimator | the **linear state readout** $\hat s = Wz + b$ | `models/dynamics_head.py` |
+| an autoencoder's decoder | the **image decoder**, which draws any latent | `models/image_decoder.py` |
+| rolling out a model in MPC | **imagination**: apply $f_\theta$ repeatedly | `MiniWAMPolicy.imagine` |
+| a linear probe in interpretability | the readout, literally a linear probe trained jointly | `StateReadout` |
 
-$$z_t = \mathrm{LN}\big(\mathrm{MLP}([\,e_{\text{img}}(o_t);\ e_{\text{txt}}(\ell);\ e_{\text{state}}(\tilde s_t)\,])\big) \in \mathbb{R}^{128}$$
+> **A note on the name.** An unrelated 2026 paper is also called *MiniWAM* ([Chen et al.](https://www.alphaxiv.org/abs/2610.12194)). It is a 0.25B-parameter model that predicts compact learned future targets. This project (mini-WAM, with a hyphen) is a separate educational build.
 
-where $\tilde s_t$ is the state normalized with dataset statistics. The image encoder is a three-layer CNN followed by a **spatial softmax** over 16 heatmaps, giving 16 $(x, y)$ keypoints plus a pooled feature vector. A plain CNN with global average pooling is also available (`--image_encoder cnn`).
+---
 
-### 3.3 Policy head
+## Part 2 — The WAM design space, and the WAMs you can download today
 
-The action head maps $z_t$ to $a_t$: an MLP regressor, a DDPM diffusion head, or a flow-matching head (`models/action_heads.py`). All three expose `loss(actions, z)` and `sample(z)`, so the rest of the model never needs to know which head it is talking to.
+Every WAM, from my 0.75M-parameter toy to a 5B-parameter video model, makes the same four decisions:
 
-> **A diffusion detail that is easy to get wrong.** My first diffusion head used a linear noise schedule from $10^{-4}$ to $10^{-2}$ with $T=16$ steps. That ends at $\bar\alpha_T \approx 0.92$, which means the "fully noised" action is still 92% signal. Sampling, though, starts from pure Gaussian noise the model never saw. mini-WAM switches to the cosine schedule of [Nichol & Dhariwal](https://doi.org/10.48550/arxiv.2102.09672) ($\bar\alpha_T \approx 10^{-5}$ at $T=16$) and samples from the proper DDPM posterior.
+```mermaid
+flowchart LR
+    Q1["1. What is predicted?"] --> Q2["2. How do actions meet the future?"] --> Q3["3. Which backbone?"] --> Q4["4. What is the prediction for?"]
+    Q1 --- A1["pixels / video latents<br/>physical state ✔<br/>learned representation<br/>nothing"]
+    Q2 --- A2["joint prediction ✔<br/>plan, then act (inverse dynamics)<br/>action-conditioned forward model ✔"]
+    Q3 --- A3["video diffusion transformer<br/>autoregressive token transformer<br/>representation predictor<br/>small MLPs ✔"]
+    Q4 --- A4["training signal only ✔<br/>planning (MPC, best-of-N)<br/>decode the action from the future<br/>synthetic training data"]
+```
 
-### 3.4 Latent dynamics: a learned simulator
+*Figure 2. The four decisions. Ticks (✔) mark mini-WAM's choices.*
+
+Let me walk through each decision in plain words.
+
+1. **What is predicted?** You can predict raw future frames (expensive, but you can look at them), a compressed learned representation (cheap, but harder to inspect), the physical state (only possible when you know it, as in simulation), or nothing at all. mini-WAM predicts the physical state, and pixels as an option.
+2. **How do actions meet the future?** You can generate the action and the future together ("joint prediction"). You can generate the future first, then ask an *inverse dynamics* model which action gets you there ("plan, then act"). Or you can build an explicit forward model that takes *any* action as input. mini-WAM trains jointly *and* has an explicit action-conditioned forward model, which is what makes "what if" questions possible.
+3. **Which backbone?** Big systems reuse pretrained video-generation models. I use small MLPs so everything trains on a laptop.
+4. **What is the prediction for?** It can just shape the representation during training (the cheapest option and the most common), rank candidate actions at test time (planning), produce the action directly, or generate fake training data for another policy.
+
+### A tour of eight open-source WAMs
+
+Here are eight WAMs whose code you can download today. They span the whole design space:
+
+- **GR-1** ([Wu et al.](https://www.alphaxiv.org/abs/2312.13139)) is a GPT-style transformer, pretrained to predict future frames from Ego4D human videos, then fine-tuned to output actions *and* future images. The future prediction is an auxiliary training signal.
+- **UWM** ([Zhu et al.](https://doi.org/10.15607/rss.2025.xxi.015)) puts video diffusion and action diffusion into one transformer, with a separate noise level for each. By choosing which one to denoise, the same network acts as a policy, a forward model, an inverse model or a video generator. That trick also lets it learn from videos that have no action labels.
+- **WorldVLA** ([Cen et al.](https://www.alphaxiv.org/abs/2506.21539)) turns images, text and actions into discrete tokens in one autoregressive multimodal LLM, which learns both to output action tokens and to predict the next frame.
+- **Genie Envisioner** ([Liao et al.](https://www.alphaxiv.org/abs/2508.05635)) is a 2B-parameter video diffusion transformer pretrained on about a million real robot episodes, with a lightweight flow-matching action module that reads its video latents. The video model doubles as a neural simulator.
+- **Cosmos Policy** ([Kim et al.](https://www.alphaxiv.org/abs/2601.16163)) fine-tunes NVIDIA's 2B Cosmos-Predict2 video model *without changing its architecture*: actions, robot state and value estimates are written into the video latent as extra "frames". At test time it plans by sampling several action proposals and picking the one whose predicted future looks most valuable.
+- **V-JEPA 2-AC** ([Assran et al.](https://www.alphaxiv.org/abs/2506.09985)) never predicts pixels. It trains a 300M-parameter action-conditioned predictor on top of a frozen self-supervised video encoder, and plans with model-predictive control in that representation space. It has no action head at all; the planner picks the actions.
+- **DreamGen** ([Jang et al.](https://www.alphaxiv.org/abs/2505.12705)) uses a video world model as a *data generator*. It fine-tunes a video model on a few robot demos, generates many new videos, labels them with an inverse-dynamics or latent-action model, and trains an ordinary policy on the result.
+- **LingBot-VA** ([Li et al.](https://www.alphaxiv.org/abs/2601.21998)) is a 5.3B-parameter autoregressive video-action model that predicts future video latents and reads actions off them with inverse dynamics. Its KV cache keeps a long memory of the past.
+
+| System | Predicts | Backbone | How actions come out | Prediction used for |
+|---|---|---|---|---|
+| GR-1 | future frames | GPT-style transformer, video-pretrained | linear head | training signal |
+| UWM | video + actions | one diffusion transformer, separate noise per modality | action diffusion | policy / forward / inverse model / video |
+| WorldVLA | next frame (tokens) | autoregressive multimodal LLM | discrete action tokens | training signal |
+| Genie Envisioner | video chunks | video diffusion transformer (2B) | flow-matching module | action decoding, neural simulator |
+| Cosmos Policy | future states + values | video diffusion (2B) | actions as latent frames | best-of-N planning |
+| V-JEPA 2-AC | future representations | frozen encoder + 300M predictor | none (planner) | MPC planning |
+| DreamGen | robot videos | fine-tuned video generator | inverse dynamics labels | synthetic data |
+| LingBot-VA | video latents | autoregressive diffusion (5.3B) | inverse dynamics | action decoding, memory |
+| **mini-WAM** | **state, pixels, latents** | **CNN + GRU + MLPs (0.75M)** | **MLP / diffusion / flow head** | **training signal, analysis** |
+
+Three of these systems report lessons that mini-WAM reproduces at toy scale, which I found reassuring:
+
+- GR-1 found that predicting a few frames ahead helps more than predicting the very next frame. mini-WAM shows the same horizon trade-off (Part 5).
+- Cosmos Policy fine-tunes its planning model on policy rollouts, *failures included*, before it trusts the predictions. mini-WAM's world model also needs non-expert actions (Part 5).
+- V-JEPA 2-AC plans in representation space instead of generating pixels. In mini-WAM, pixels are where most of the cost goes (Part 6).
+
+---
+
+## Part 3 — Building mini-WAM, step by step
+
+### 3.1 A toy world built for checking
+
+![The toy world](figures/fig-toy-world.svg)
+
+*Figure 3. **The toy world.** (a) Frames from one expert episode. The red dot must reach the goal named in the instruction ("go to the blue goal"); the other square is a distractor that only appears in the image. (b) Actions in one training episode: at each step there is a 30% chance of starting a burst of 1–3 random actions (shaded). Everything else comes from the expert.*
+
+I could have started with a real robot benchmark. I deliberately didn't. To *understand* a world model I wanted three things a big benchmark doesn't give cheaply:
+
+1. **Speed.** 400 episodes collect in a few seconds on a laptop.
+2. **A fully known state.** The world is described by six numbers: position $(x, y)$, velocity $(v_x, v_y)$, and the instructed goal $(g_x, g_y)$. So "does the latent know where the robot is?" has an exact answer.
+3. **A true simulator.** I can ask the model "what if I had pushed left?" *and* check its answer.
+
+The physics is a point mass with momentum, in `envs/toy_point_env.py`:
+
+$$v_{t+1} = 0.8\,v_t + 0.01\,a_t, \qquad p_{t+1} = \mathrm{clip}(p_t + v_{t+1}, 0, 1).$$
+
+An episode succeeds when the agent is within 0.05 of the right goal **and** nearly stopped, so the expert (a simple PD controller) has to brake. One detail matters a lot later: **velocity is never drawn in the image.** Two frames with opposite velocities look identical.
+
+**Exploration bursts.** The data collector in `scripts/collect_data.py` mostly runs the expert, but sometimes hands control to random actions for a few steps:
+
+```python
+if burst == 0 and rng.random() < args.random_action_prob:   # 0.3 by default
+    burst = rng.integers(1, args.random_burst + 1)           # 1-3 steps
+expert_step = burst == 0
+...
+is_expert.append(float(expert_step))
+```
+
+Every transition is tagged `is_expert`. The policy will only imitate expert steps; the world model learns from everything. Part 5 shows why this matters so much.
+
+### 3.2 From pixels, words and numbers to one latent
+
+```mermaid
+flowchart LR
+    I[image] --> IE["CNN + spatial softmax<br/>(16 keypoints)"]
+    L[instruction] --> TE[GRU]
+    S[state] --> SE[MLP]
+    IE --> F["fusion MLP + LayerNorm"]
+    TE --> F
+    SE --> F
+    F --> Z(("z (128 numbers)"))
+```
+
+This part is a standard small VLA encoder, adapted from my earlier [mini-VLA](https://github.com/keivalya/mini-vla) project. The one twist is the image encoder. Instead of averaging the CNN's feature maps away (which throws away *where* things are), it ends in a **spatial softmax**: each of 16 feature maps becomes a probability map over the image, and its expected position becomes an $(x, y)$ "keypoint":
+
+```python
+def _expected_xy(self, attn):           # attn: (B, K, h, w), sums to 1 over (h, w)
+    ys = torch.linspace(-1, 1, h)
+    xs = torch.linspace(-1, 1, w)
+    kp_x = (attn.sum(dim=2) * xs).sum(dim=-1)
+    kp_y = (attn.sum(dim=3) * ys).sum(dim=-1)
+    return torch.stack([kp_x, kp_y], dim=-1)    # (B, K, 2)
+```
+
+The nice side effect is that you can draw the keypoints on the image and *see* what the encoder looks at (Figure 12).
+
+### 3.3 The policy head
+
+The action head maps $z_t$ to an action. It's the same menu as in any VLA: a plain MLP regressor, a DDPM diffusion head, or a flow-matching head (`models/action_heads.py`). All three expose `loss(actions, z)` and `sample(z)`, so nothing else in the model cares which one you pick. All experiments here use the MLP head.
+
+> **A diffusion detail that is easy to get wrong.** My first diffusion head used a linear noise schedule from $10^{-4}$ to $10^{-2}$ over 16 steps. That sounds reasonable, but it ends at $\bar\alpha_T \approx 0.92$: the "fully noised" action is still 92% signal. Sampling, though, starts from pure Gaussian noise the model never saw in training. Switching to a cosine schedule ($\bar\alpha_T \approx 10^{-5}$) and the proper DDPM posterior fixed it. If you build a diffusion head with few steps, check $\bar\alpha_T$.
+
+### 3.4 The world model: twelve lines
+
+Here is the entire world model, from `models/dynamics_head.py`:
 
 ```python
 class LatentDynamicsMLP(nn.Module):
+    def __init__(self, d_model, action_dim, hidden_dim=256):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(d_model + action_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim), nn.ReLU(),
+            nn.Linear(hidden_dim, d_model),
+        )
+        self.ln = nn.LayerNorm(d_model)
+
     def forward(self, z, action):
         delta = self.net(torch.cat([z, action], dim=-1))
         return self.ln(z + delta)
 ```
 
-That is the whole world model (`models/dynamics_head.py`). Two small choices matter:
+Two small choices make it work:
 
-* **Residual:** most of the world stays the same from one step to the next, so the network only predicts the change.
-* **LayerNorm on the output:** the fused latent $z_t$ is also LayerNorm-ed, so imagined latents stay on the same scale as real ones and long rollouts don't drift off.
-
-Imagination is just a loop:
-
-$$\hat z_{t} = z_t,\qquad \hat z_{t+k} = f_\theta(\hat z_{t+k-1},\, a_{t+k-1}),\quad k=1,\dots,H.$$
+- **It's residual.** Most of the world stays the same from one step to the next, so the network only has to predict the *change*.
+- **It ends in a LayerNorm.** The encoder's latent also ends in a LayerNorm, so imagined latents stay on the same scale as real ones and long rollouts don't drift off to infinity.
 
 ### 3.5 Readouts: making the latent readable
 
-* **State readout** (`StateReadout`): by default a single linear layer, $\hat s = W z + b$. If agent position and velocity can be recovered *linearly* from $z$, they are explicitly encoded there, and the rows of $W$ tell you which latent directions mean what. This is a linear probe ([Alain & Bengio](https://www.alphaxiv.org/abs/1610.01644)), trained jointly with everything else and applied to real *and* imagined latents.
-* **Image decoder** (`models/image_decoder.py`): $z \to 128\times4\times4 \to$ four (upsample + conv) blocks $\to 3\times64\times64$. It predicts the *difference from the dataset's mean image*, with no sigmoid. Most pixels are static background, so the decoder starts out already drawing the background. In my first version, with a sigmoid output, the decoder got stuck: after two epochs its error was worse than just predicting the mean image.
+A latent is useless to a human unless you can read it. mini-WAM has two readouts, and both work on *any* latent, encoded from a real frame or imagined:
 
-### 3.6 Training objective
+- **A linear state readout**, $\hat s = Wz + b$. I made it linear on purpose. If position and velocity can be recovered with a single linear layer, they are explicitly encoded in $z$, and the rows of $W$ tell you which directions mean what.
+- **An image decoder** that turns $z$ back into a $64\times64$ picture. It predicts the *difference from the dataset's average image*, with no sigmoid at the end. Most pixels are static background, so the decoder starts out already drawing the background and spends its capacity on what moves. My first version used a sigmoid, got stuck, and was worse than just predicting the average image.
 
-Each training sample is a window of $H$ steps inside one episode: $o_t, a_t, \dots, a_{t+H-1}, o_{t+1}, \dots, o_{t+H}$. With $z_t = \mathrm{enc}(o_t)$ and the imagined $\hat z_{t+k}$ from §3.4:
+### 3.6 One training step
 
-$$
-\mathcal{L} =
-\underbrace{\mathcal{L}_{\text{act}}(a_t \mid z_t)}_{\text{imitate (expert steps only)}}
-+ w_s\Big(\underbrace{\|R(z_t)-\tilde s_t\|^2}_{\text{know the state now}} + \underbrace{\tfrac1H\textstyle\sum_k\|R(\hat z_{t+k})-\tilde s_{t+k}\|^2}_{\text{predict it}}\Big)
-+ w_i\Big(\|D(z_t)-o_t\|^2 + \tfrac1H\textstyle\sum_k\|D(\hat z_{t+k})-o_{t+k}\|^2\Big)
-+ w_z\,\tfrac1H\textstyle\sum_k\big\|\hat z_{t+k}-\mathrm{sg}[\mathrm{enc}(o_{t+k})]\big\|^2
-$$
+```mermaid
+flowchart LR
+    W["sample a window from one episode:<br/>o_t, a_t…a_t+H-1, o_t+1…o_t+H"] --> E["encode o_t → z_t"]
+    E --> R["roll out the dynamics H steps<br/>with the real actions"]
+    R --> O["read out states and images<br/>of the imagined latents"]
+    O --> L["sum the losses"]
+    W --> T["encode o_t+1…o_t+H<br/>(no gradient)"] --> L
+    E --> P["action loss<br/>(expert steps only)"] --> L
+```
 
-with $R$ the state readout, $D$ the image decoder, $\mathrm{sg}$ stop-gradient, and defaults $w_s=0.5$, $w_i=1$, $w_z=1$, $H=5$ (`models/losses.py`).
+*Figure 4. One training step. The model sees only the first frame; it has to imagine the next H.*
 
-* The **reconstruction** terms anchor $z_t$ to the real world and stop the latent from collapsing to a constant.
-* The **prediction** terms teach the dynamics what actions do.
-* The **latent consistency** term keeps imagined latents *in distribution*, so the policy and decoders still make sense when applied to them.
+For each training window of $H = 5$ steps:
 
-Setting `--model_type vla` removes everything except $\mathcal{L}_{\text{act}}$, leaving a plain VLA with identical encoders. That **VLA baseline** is the comparison in every experiment.
+1. Encode **only the first frame**, $o_t$, into $z_t$.
+2. Roll the dynamics forward 5 steps with the actions that were really taken. The model never sees frames $o_{t+1}, \dots, o_{t+5}$.
+3. Read out the state and image of every imagined latent and compare them with the truth.
+4. Also encode the real future frames (without gradients) and pull the imagined latents toward them. This is **latent consistency**: it keeps imagined latents in the region where the readouts and the policy know what to do.
+5. Add the imitation loss, but only on expert steps:
 
-### 3.7 How big is it?
+```python
+expert = batch["is_expert"] > 0.5
+action_loss = self.policy_head.loss(batch["action"][expert], z[expert])
+```
 
-Parameter counts for the toy world (state dim 6, action dim 2, $d=128$, MLP head):
+In symbols:
 
-| module | file | lines | parameters |
-|---|---|---|---|
-| image encoder (keypoints) | `models/encoders.py` | 123 (all encoders) | 71,568 |
-| text encoder (GRU) | | | 75,264 |
-| state encoder | | | 9,024 |
-| fusion | `models/fusion.py` | 20 | 66,048 |
-| action head (MLP) | `models/action_heads.py` | 55 | 16,770 |
-| **latent dynamics** | `models/dynamics_head.py` | 89 | **132,480** |
-| **state readout (linear)** | | | **774** |
-| **image decoder** | `models/image_decoder.py` | 59 | **375,811** |
-| losses | `models/losses.py` | 76 | — |
-| wiring + `imagine()` | `models/wam_policy.py` | 258 | — |
-| **total** | | | **WAM 747,739 · VLA 238,674** |
+$$\mathcal{L} = \mathcal{L}_{\text{act}} + w_s\,\mathcal{L}_{\text{state}} + w_i\,\mathcal{L}_{\text{image}} + w_z \cdot \tfrac1H \sum_k \|\hat z_{t+k} - \mathrm{sg}[\mathrm{enc}(o_{t+k})]\|^2,$$
 
-The bold rows are what a WAM adds to a VLA. Two-thirds of the extra parameters are the image decoder; the world model itself (dynamics + readout) is about 133k parameters.
+with $w_s = 0.5$ and $w_i = w_z = 1$. Delete every term except $\mathcal{L}_{\text{act}}$ and you get the **VLA baseline**, with identical encoders. That's the comparison in every experiment.
 
----
+### 3.7 Imagining and dreaming
 
-## 4. A toy world for understanding WAMs
+Once trained, the model can roll forward in two ways. Both live in one function, `MiniWAMPolicy.imagine`:
 
-### 4.1 Why not start with Meta-World?
+```python
+z = self.encode_obs(image, text_tokens, state)
+for k in range(horizon):
+    a = self.policy_head.sample(z) if actions is None else actions[:, k]
+    z = self.dynamics(z, a)
+```
 
-mini-WAM runs on Meta-World too (`--env metaworld`), but for *understanding* a world model I wanted three things Meta-World doesn't give cheaply:
+- **Imagined**: you supply the actions. "Given these actions, what happens?" You can check the answer against the real episode.
+- **Dreamed**: you pass `actions=None`, and the model's *own policy* chooses each action from its own imagined latent. Nothing from the real world is used after the first frame. "What do I think will happen if I act the way I would act?"
 
-1. **Fast:** 400 episodes are collected in a few seconds on a laptop CPU.
-2. **Fully known state:** so "does the latent encode the world?" has a precise answer.
-3. **A true simulator for counterfactuals:** so we can ask the model "what if I had pushed left?" and check the answer.
-
-### 4.2 The world
-
-`envs/toy_point_env.py` is a red point mass in the unit square, with a blue and a green goal. The instruction, `"go to the blue goal"` or `"go to the green goal"`, says which goal counts, so the policy has to read the language. The dynamics have momentum:
-
-$$v_{t+1} = 0.8\,v_t + 0.01\,a_t,\qquad p_{t+1} = \mathrm{clip}(p_t + v_{t+1},\,0,\,1),$$
-
-and an episode succeeds when the agent is within 0.05 of the instructed goal **and** almost stopped, so the expert (a PD controller) has to brake. The state is $[\,x, y, v_x, v_y, g_x, g_y\,]$, where $g$ is the *instructed* goal; the other goal appears only in the image. Velocity is not visible in a single frame, so predicting the next frame requires inferring it.
-
-### 4.3 Data: expert demos *plus* exploration
-
-`scripts/collect_data.py` runs the expert, and at each step starts, with probability $p$ (default 0.3), a burst of 1–3 uniformly random actions. Each transition is tagged `is_expert`. **The policy imitates only expert steps; the world model trains on all of them.**
-
-Why bother? In pure expert data, $a_t$ is (up to a little noise) a function of $s_t$. A world model can then predict $s_{t+1}$ from $s_t$ alone and never look at the action. This is the world-model version of *causal confusion* in imitation learning ([de Haan et al.](https://doi.org/10.48550/arxiv.1905.11979)): a shortcut that fits the data perfectly and fails as soon as you ask about an action the expert didn't take. §5.3 measures it.
-
----
-
-## 5. Experiments
-
-### 5.1 Setup and metrics
-
-Every configuration is run **three times**. Each run has its own dataset, its own split into training and held-out episodes (90/10) and its own initialization. Unless an experiment changes it, a dataset has 400 episodes and training runs for 15 epochs. Every run trains a mini-WAM *and* the VLA baseline on the same data, with the same encoders and MLP action head. I report mean ± standard deviation over the three runs. All runs used single GPUs (mostly V100s) on Northeastern's Explorer cluster; a full experiment (three runs) takes 15–30 minutes.
-
-What I measure, all on held-out episodes:
-
-| metric | question it answers | reference point |
-|---|---|---|
-| **closed-loop success** | Does the policy solve the task? 100 episodes per run, in environment instances never seen in training. | WAM vs. VLA |
-| **imagined state error** at $k$ steps | Encode $o_t$ once, roll the dynamics forward $k$ steps with the actions that were really taken, read out the state, and compare it with the true $s_{t+k}$ (MSE in normalized units). | the **"nothing changes"** baseline $\hat s_{t+k}=s_t$ |
-| **counterfactual error** at $k$ steps | Same, but with *random* action sequences the expert never took, compared against the toy simulator's ground truth (agent position and velocity; 8 random plans from every 5th step of each held-out episode). | the **"ignore the actions"** baseline: the true future under zero actions |
-| **image error** | Pixel MSE between the decoded imagined frame and the real future frame. | copying the current frame |
-| **readout $R^2$** | How much of each state variable a *linear* map recovers from real ($k=0$) and imagined ($k>0$) latents. | 1 = perfect |
-
-The two state errors are the heart of the evaluation. The factual one asks *"can you predict what happened?"*; the counterfactual one asks *"do you know what your actions do?"*. As §5.3 shows, a model can ace the first and fail the second.
-
-### 5.2 Does mini-WAM imagine the future?
-
-Yes, at the level of the state, and no, at the level of pixels.
-
-![Imagination quality](figures/fig-imagination-quality.svg)
-
-*Figure 2. **mini-WAM's imagined states are accurate and action-aware; its imagined pixels are not.** (a) Imagined state error with the real actions vs. the "nothing changes" baseline. (b) Counterfactual error under random action sequences vs. a model that ignores actions. (c) Pixel error of decoded imagined frames vs. copying the current frame. Mean ± std over 3 runs (bands are narrow); 40 held-out episodes per run.*
-
-* **States.** Fifteen steps into an open-loop imagination, the state error is $0.0071 \pm 0.0004$, about 80× lower than the "nothing changes" baseline ($0.582 \pm 0.015$). A linear readout recovers every state variable from the imagined latent with $R^2 \ge 0.98$ (averaged over runs; overall mean $0.992 \pm 0.001$) at $k=15$.
-* **Actions.** Under random action sequences the expert never produced, the error after 10 steps is $0.0072 \pm 0.0005$, versus $0.388 \pm 0.001$ for a model that ignored the actions. So the world model has learned what actions *do*, not just what the expert usually did.
-* **Pixels.** The decoded imagination is *worse* than just copying the current frame at every horizon ($0.0073$ vs. $0.0050$ at $k=15$). Figure 3 shows why: the decoder draws the agent and the instructed goal, but drops the distractor goal. I come back to this in §6.
-* **The policy.** Both mini-WAM and the VLA baseline succeed on 100% of test episodes in all three runs (26.4 vs. 26.1 steps on average). This task is too easy to separate them; §5.6 makes it harder.
-
-![Imagination strip](figures/fig-episode-strip.svg)
-
-*Figure 3. **One held-out episode, as the model sees it.** Row 1: real frames. Row 2: decoding the latent of each real frame. Row 3: decoding an open-loop imagination from $t=0$ with the real actions. The model never sees frames 1–28. Row 4: "dreaming", where the model's own policy picks the actions inside its imagination.*
-
-### 5.3 Does the world model understand actions? (exploration data)
-
-This is the experiment that taught me the most. I trained three world models that differ *only* in the data: 0%, 30% or 60% of steps start a short burst of random actions. Everything else, including the number of episodes, is the same.
-
-![Exploration](figures/fig-exploration.svg)
-
-*Figure 4. **Trained on expert demos alone, the world model is great at predicting what happened and poor at predicting anything else.** (a) Imagined state error after 10 steps with the real actions (factual, green) and with random actions compared to the true simulator (counterfactual, orange). Grey: the error of a model that ignores the actions altogether. (b) Closed-loop success. Mean ± std over 3 runs.*
-
-With expert-only data the factual error is the *lowest* of the three settings ($0.0035 \pm 0.0016$ at $k=10$, vs. $0.0046 \pm 0.0005$ with 30% and $0.0052 \pm 0.0017$ with 60% exploration). If factual prediction were all you checked, you would conclude expert-only data is best. The counterfactual error says otherwise: $0.112 \pm 0.005$ at $k=10$, **15× worse** than with exploration ($0.0072 \pm 0.0005$). It is still better than ignoring actions entirely (0.295), so the model uses the action a little. My reading is that mostly it has learned *"the expert will drive toward the goal"*.
-
-Why? In expert data the action is a deterministic-ish function of the state, $a_t \approx \pi^*(s_t)$, so
-
-$$s_{t+1} = f(s_t, a_t) \approx f(s_t, \pi^*(s_t)) =: g(s_t).$$
-
-The network can fit $g$ without ever using its action input. Nothing in the loss tells it that $a_t$ matters, because $a_t$ carries no information beyond $s_t$. Imitation learning has the same disease under the name *causal confusion* ([de Haan et al.](https://doi.org/10.48550/arxiv.1905.11979)). The fix is the same too: break the correlation by putting actions into the data that the expert would not have chosen. A few random bursts are enough. Going from 30% to 60% exploration changes little (counterfactual error at $k=10$: $0.0063 \pm 0.0023$).
-
-Two lessons I'd carry to big WAMs:
-
-1. **Measure counterfactuals, not just reconstruction.** Video-prediction quality on held-out demos is a factual metric. It can look great while the model ignores the action. AD-WM makes the same point for planning ([AD-WM](https://www.alphaxiv.org/abs/2609.30264)).
-2. **The policy does not care, yet.** All three settings reach 100% success, and the policy only imitates expert steps, so exploration data cost nothing here. The world model needs action diversity; the policy needs expert quality. Tagging transitions (`is_expert`) lets one dataset serve both.
-
-### 5.4 Which parts of the objective matter?
-
-Next I removed one piece of the objective at a time, and changed the length $H$ of the imagined windows used in training.
-
-![Ablations](figures/fig-ablations.svg)
-
-*Figure 5. **The training horizon matters most; the latent-consistency and image losses matter little on this task.** Each row changes one thing relative to the full objective (grey). (a) Imagined state error after 15 steps. (b) Counterfactual error after 10 random-action steps. (c) Closed-loop success. (d) Image error after 1 step. For "no image loss" the decoder is untrained, so (d) is meaningless there. Mean ± std over 3 runs.*
-
-* **Imagination horizon is the big knob.** Training on one-step transitions ($H=1$) gives the same one-step accuracy as $H=5$ ($0.0019$ in both cases), but the errors compound: after 10 counterfactual steps the error doubles ($0.0139 \pm 0.0008$ vs. $0.0072 \pm 0.0005$). Training on longer windows ($H=10$) goes the other way. Long-range imagination improves ($0.0057 \pm 0.0005$ at $k=10$; $0.0046 \pm 0.0007$ state error at $k=15$), and short-range gets a bit worse ($0.0030 \pm 0.0003$ at $k=1$). *You get good at the horizon you train on.* This is the same trade-off as single-step vs. multi-step ("rollout") losses in model-based RL.
-* **The latent-consistency loss buys stability, not accuracy.** Without it, short imaginations are slightly *better* ($0.0016$ vs. $0.0019$ at $k=1$), but 15-step imaginations are worse and much less consistent across runs ($0.0096 \pm 0.0024$ vs. $0.0071 \pm 0.0004$).
-* **The image loss is not what makes the latent good here.** Removing it leaves every state metric within noise ($0.0074 \pm 0.0021$ vs. $0.0071 \pm 0.0004$ at $k=15$). That is not a general statement about pixels: in this task the state is an input, so the latent can learn the world from the state alone. §5.6 removes that crutch.
-* **None of it changes the policy.** All variants reach 99–100% closed-loop success.
-
-### 5.5 Looking inside the world model
-
-The numbers above say the latent world model works. The figures in this section show *what it believes*. The model outputs behind them are exported from the trained checkpoints by `docs/figures/export_figure_data.py`; single-episode panels show one baseline run, and every quantitative panel covers all held-out episodes of all three runs.
-
-**Beliefs over time.** Figure 6 plots each state variable for one held-out episode: the truth, what the latent says *now* (read out from the encoding of each real frame), what the model *imagined* from $t=0$ with the real actions, and what it *dreamed* with its own policy. The imagined velocity follows every wiggle of the (noisy) expert for 28 steps without seeing a single new frame. The dream is smooth, because the learned policy is deterministic and has no expert noise, but it still ends up at the goal.
-
-![Beliefs](figures/fig-beliefs.svg)
-
-*Figure 6. **The imagined trajectory tracks the true one, wiggles and all.** Agent position (a, b) and velocity (c, d) over one held-out episode. Black: truth. Blue: linear readout of the encoded real frame at each step. Red dashed: open-loop imagination from $t=0$ using the real actions. Purple dotted: the model's own policy acting inside its imagination. Single episode.*
-
-**What if?** Figure 7 starts from one real frame and asks the model to imagine 15 steps of a constant push in eight directions (plus no push). A constant 15-step push is far longer than any random burst in the training data (1–3 steps), so this tests extrapolation. In the example (a), most imagined trajectories land close to the true simulator, but several stop short or bend. Measured from the first frame of every held-out episode in all three runs (c), the imagined endpoint after a push is off by $0.103 \pm 0.010$ arena units (the arena is the unit square), against $0.457$ for a prediction that ignores the push. The model clearly uses the action, but it is far from exact when extrapolating. The decoded frames (b) are rougher still; the agent is often missing. The *state* of the imagination is better than its *picture*.
-
-![What if](figures/fig-what-if.svg)
-
-*Figure 7. **The world model extrapolates to unseen actions, imperfectly.** (a) From one held-out start, imagined (dashed) vs. true (solid) agent trajectories for 15 steps of constant unit force in each direction. (b) The decoded imagined frames after 15 steps. (c) Endpoint error of the imagined agent position, averaged over the first frame of all 40 held-out episodes per run; bars are mean ± std over 3 runs. Grey: the error of a prediction that ignores the push.*
-
-**The latent map.** Figure 8 projects held-out latents onto their top principal components. The first two components mostly encode *where the goal is* (each streak is roughly one episode), and the velocity components only appear at PC5–PC6. That is a useful reminder that PCA ranks directions by *variance*, not importance: the latent spends most of its variance on the goal location because that varies most across episodes.
-
-![Latent map](figures/fig-latent-map.svg)
-
-*Figure 8. **The latent is organized by goal location first, velocity later.** (a) Held-out latents projected on their first two principal components, coloured by episode progress, with one encoded (black) and imagined (red) trajectory. (b) Pearson correlation between the first eight components and each state variable; |r| ≥ 0.5 is printed.*
-
-**What does the image encoder look at?** The spatial-softmax keypoints (§3.2) can be drawn on the frames. In the baseline they barely move (Figure 10a): over held-out episodes their positions vary by a standard deviation of only 0.0002–0.0013 (image coordinates run from −1 to 1), so the heatmaps are nearly flat. They still correlate with the agent to some degree (best-keypoint tracking $R^2$ between 0.16 and 0.80 across runs), but the movement is tiny. My interpretation: the state input already tells the model where the agent and goals are, so the image encoder has little pressure to localize anything. The image-only experiment in §5.6 tests this.
-
-### 5.6 When does a world model help the policy?
-
-Up to now the policy never benefited: the VLA baseline was already at 100%. I tried two ways of making the task harder for the *policy*: fewer demonstrations, and taking away the state input.
-
-![Data and state input](figures/fig-data-and-state.svg)
-
-*Figure 9. **The world-model objective hurts with very few demos, and helps a lot when the state must be inferred from pixels.** (a) Closed-loop success vs. number of demonstration episodes (15 epochs each). Open markers: the same 25 episodes trained ~15× longer, to match the baseline's number of gradient steps. (b) Success with and without the state input (400 episodes). Mean ± std over 3 runs; 100 test episodes per run.*
-
-**Few demonstrations: the WAM is *worse*.** With 25 episodes per run, mini-WAM succeeds $87.0 \pm 7.8\%$ of the time vs. $99.7 \pm 0.5\%$ for the VLA baseline. With 50 episodes the gap shrinks ($96.7 \pm 2.6\%$ vs. $99.7 \pm 0.5\%$), and with 100 it is gone ($100\%$ vs. $99.7 \pm 0.5\%$). One confound is training length. All runs use 15 epochs, so 25 episodes means about 1/16 of the baseline's gradient steps, and the WAM has more to learn in those steps. To check, I trained the same 25-episode datasets for 225 epochs, roughly the baseline's number of gradient steps. The gap mostly closes: $96.3 \pm 1.2\%$ for mini-WAM vs. $98.7 \pm 1.9\%$ for the VLA baseline. So most of the low-data penalty was *undertraining*, presumably because the WAM has four losses to fit with the same encoder and needs more steps to get its policy right. What remains is a gap of about 2 points; mini-WAM is behind or tied in every run (98/100, 95/100, 96/96%). Training longer does expose a new problem, though. The world model overfits its 23 training episodes badly (in the training log, image loss is 0.0005 on training data vs. 0.016 on held-out episodes; imagined-state $R^2$ at $k=15$ only $0.72 \pm 0.17$). Here, at least, the world model needed far more data than the policy.
-
-**No state input: the WAM is much *better*.** When both models see only the image and the instruction, mini-WAM succeeds $80.3 \pm 12.0\%$ of the time and the VLA baseline only $36.0 \pm 19.8\%$ (mean episode length 32.5 vs. 60.1 steps). The spread across runs is large, but the WAM is ahead in every run, by 5 to 74 percentage points.
-
-Why does the world model help so much here? The probe gives a clean answer. Velocity is invisible in a single frame, and it matters: the agent has momentum, and the expert brakes before the goal. Look at the linear readout of mini-WAM's latent:
-
-| readout $R^2$ | position $(x, y)$ | velocity $(v_x, v_y)$ |
-|---|---|---|
-| encoded current frame ($k=0$) | 0.994 / 0.993 | **0.47 / 0.50** |
-| after 1 imagined step | 0.994 / 0.992 | 0.69 / 0.71 |
-| after 5 imagined steps | 0.985 / 0.981 | **0.92 / 0.93** |
-
-*(Image-only run, mean of 3 runs; full numbers in `docs/results/image-only`.)*
-
-From pixels alone, the latent knows *where* the agent is but only about half of *how fast* it is going. After a few imagined steps it knows velocity well, because the dynamics model integrates the actions it was given. If you have built a Kalman filter, this is the *predict* step: a motion model plus known controls recovers a state you cannot observe directly. The WAM is forced to learn that motion model; the VLA is not.
-
-The keypoints tell the same story (Figure 10). Without the state input they spread out and lock onto the agent and the goals: their movement grows by two to three orders of magnitude (standard deviation 0.14–0.27), and the best keypoint tracks the agent with $R^2 \ge 0.998$ in every run.
-
-![Keypoints](figures/fig-keypoints.svg)
-
-*Figure 10. **Without the state input, the encoder learns to look.** The 16 spatial-softmax keypoints (crosses, one colour each) on a held-out episode for (a) the baseline, where they sit still near the image centre, and (b) the image-only model, where they follow the agent and mark the goals. (c) Spread of the keypoint positions over held-out episodes (log scale); bars are geometric means, dots are the 3 runs.*
-
-One caveat: mini-WAM's *policy* still acts on the encoding of the current frame. It never uses the imagined velocity at test time. My interpretation is that the benefit comes from training: predicting the future forces the shared encoder to represent things, like motion cues, that help the policy as well. I have not isolated this mechanism. A policy that consumes the imagination directly, or a short history of frames, would probably do better still. I have not tested either.
-
-## 6. Discussion and lessons
-
-Here is what I would tell someone moving from VLAs to WAMs, based on what this small model did.
-
-**1. A WAM is a VLA with a learned simulator attached, and the simulator can be very good.** mini-WAM's latent dynamics is a 132k-parameter residual MLP. On held-out episodes it imagines 15 steps ahead with about 80× less error than assuming nothing changes, and a single linear layer reads position, velocity and goal out of every imagined latent. If you have used a forward model in MPC, this is the same object, learned from pixels + language + state instead of written down.
-
-**2. "Predicts the future well" and "understands actions" are different claims. Test both.** The expert-only world model had the *best* factual imagination and the *worst* counterfactual one (§5.3). Any metric computed on held-out *demonstrations* (reconstruction, video quality, next-state MSE) is factual. To know whether the model would be useful for choosing *between* actions, you need counterfactual data or a simulator to check against. This connects to a broader point in the literature: "a model can therefore achieve low factual prediction error yet poorly distinguish candidate actions" ([AD-WM](https://www.alphaxiv.org/abs/2609.30264)).
-
-**3. The world model needs different data than the policy.** The policy wants expert actions; the world model wants *varied* actions. Mixing a few random bursts into the demos and tagging them (`is_expert`) served both at no cost to the policy. For real robots, the same role could be played by play data, failed attempts, or autonomous rollouts, which are data a pure imitation learner would throw away.
-
-**4. You get good at the horizon you train on.** One-step training compounds errors. Ten-step training gives up some one-step accuracy ($0.0030$ vs. $0.0019$) for 20–35% lower error on long rollouts (§5.4). If you plan to imagine $k$ steps ahead, train on windows of about $k$ steps.
-
-**5. Pixels are an expensive and misleading target.** mini-WAM's decoded imagination was worse than copying the frame, mostly because it drops the distractor goal, an object that is irrelevant to the instructed task. Meanwhile the *state* of the imagination was excellent. Large WAMs face the same tension at scale. Chen et al.'s MiniWAM, for example, predicts compact learned future representations instead of native visual features and reports that this is both cheaper and better for policy learning ([MiniWAM](https://www.alphaxiv.org/abs/2610.12194)). The survey puts the general point well: "This separation can create a mismatch between predictive fidelity and control utility: visually plausible futures are not necessarily actionable, and accurate short-horizon prediction does not guarantee robust long-horizon behavior" ([Survey](https://www.alphaxiv.org/abs/2609.16074)).
-
-**6. A world-model objective does not automatically make a better policy, but it helps when the policy has to infer something.** When the state was given, the WAM's policy was never meaningfully better than the VLA's. With very few demos it was worse, mostly because it needed more training steps (§5.6). When the state had to be inferred from pixels, the WAM more than doubled the success rate ($80\%$ vs. $36\%$), and the probe shows why: learning to predict the future forces the latent to model motion, which a single frame does not show. My takeaway is that world modeling pays off when there is *hidden state* the future depends on. That describes most real robot problems (occlusion, contact forces, object properties), and it describes very little of a fully observed toy world.
-
-### Limitations
-
-* **Toy world, one task family.** Everything here is a 2D point mass with two goals. The dynamics are smooth and fully observed when the state is an input. Contact, occlusion and long horizons are where WAMs are supposed to shine, and none of them are present.
-* **The world model is never *used* at test time.** mini-WAM's policy acts reactively from $z_t$, exactly like a VLA. The world model shapes the latent during training, and `imagine()` is used for analysis, but there is no planning. Using the imagination to choose actions (MPC, or training the policy inside the dream as Dreamer does) is the obvious next step.
-* **Small study.** Three runs per configuration, one set of hyperparameters (tuned for the baseline), 15 epochs, MLP action head only.
-* **The counterfactual test only checks agent position and velocity**, and only in the toy world, where a true simulator exists.
-
-### What I'd try next
-
-1. **Plan with the world model.** Sample action sequences, imagine each with `model.imagine(..., actions=...)`, score the imagined states against the goal, and execute the best first action. Everything needed is already in the code.
-2. **Make the task need foresight:** obstacles, a goal that moves, or delayed effects.
-3. **Meta-World.** `collect_data.py` and `test.py` already support it.
-
-
-## 7. Conclusion
-
-A World Action Model is not a mysterious new kind of network. It is a VLA plus a learned simulator that shares the VLA's latent space. mini-WAM builds one in about 1,000 lines. The simulator works: it imagines accurately, it can be read linearly, and it responds to actions, *if* the data contains actions worth responding to. The study also shows the two places where WAMs differ most from VLAs in practice. They need different data (diverse actions, not just expert ones), and they pay off most when something about the world is hidden from a single observation. Both lessons were cheap to find at this scale, and I expect both to matter at every scale.
-
-## 8. Reproducing everything
+### 3.8 Run it yourself
 
 ```sh
 pip install -r requirements.txt
-bash scripts/run_toy.sh        # 3 runs: collect, train WAM + VLA, evaluate, test, visualize, summarize
+
+# collect 400 episodes of the toy world (seconds)
+python -m scripts.collect_data --env toy --episodes 400 --max-steps 80 --output-path data/toy.npz
+
+# train the WAM (CPU is fine) and the VLA baseline
+python -m scripts.train --dataset-path data/toy.npz --model_type wam --predict_state --predict_image \
+  --epochs 15 --save-path checkpoints/wam.pt --device cpu
+python -m scripts.train --dataset-path data/toy.npz --model_type vla --epochs 15 \
+  --save-path checkpoints/vla.pt --device cpu
+
+# how good is the imagination? what does the model believe?
+python -m scripts.evaluate --checkpoint checkpoints/wam.pt
+python -m scripts.visualize_rollout --checkpoint checkpoints/wam.pt --video
+
+# closed loop, with a "mind's eye" video of what it expects next
+python -m scripts.test --checkpoint checkpoints/wam.pt --episodes 20 --save-video
 ```
 
-Every experiment in §5 is `scripts/run_toy.sh` with **one line** of its configuration block changed:
+For the full study (three independent runs of everything): `bash scripts/run_toy.sh`.
 
-| experiment | change in `scripts/run_toy.sh` | results |
+---
+
+## Part 4 — Does it actually imagine?
+
+Every number from here on is measured on held-out episodes and averaged over three independent training runs, each with its own data and initialization. Figures show the spread across runs.
+
+![Imagination quality](figures/fig-imagination-quality.svg)
+
+*Figure 5. **Imagined states are accurate and action-aware; imagined pixels are not.** (a) State error vs. how many steps the model imagines, compared with a lazy baseline that says "nothing changes". (b) The same under random actions, checked against the true simulator, compared with a baseline that ignores the actions. (c) Pixel error of the decoded imagination vs. just copying the current frame.*
+
+- **States: yes.** After 15 imagined steps, the state error is $0.0071 \pm 0.0004$, about 80× lower than "nothing changes" ($0.582$).
+- **Actions: yes.** Under random action sequences the expert never produced, the error after 10 steps is $0.0072$, versus $0.388$ for a model that ignores the actions. The world model knows what actions *do*.
+- **Pixels: no.** The decoded frames are worse than just copying the current frame, at every horizon. Copying is a strong baseline when most of the image is static background.
+
+Here's one episode, as the model sees it:
+
+![Episode strip](figures/fig-episode-strip.svg)
+
+*Figure 6. Real frames; the decoding of each real frame's latent; an imagination from $t = 0$ with the real actions (the model never sees frames 1–28); and a dream, where its own policy acts. Notice what's missing from every decoded row: the blue distractor goal.*
+
+The decoder draws the agent and the *instructed* goal, but drops the distractor. My best guess is that nothing the model needs depends on the distractor: the state readout only cares about the instructed goal. I haven't proven that, though.
+
+And here's what the model believes over time, variable by variable:
+
+![Beliefs](figures/fig-beliefs.svg)
+
+*Figure 7. Agent position and velocity over one held-out episode: the truth (black), the readout of each real frame's latent (blue), an imagination from $t = 0$ with the real actions (red dashed), and a dream with the model's own policy (purple dotted). The imagined velocity follows the noisy expert's every wiggle for 28 steps; the dream is smooth because the learned policy has no expert noise.*
+
+**What if?** The question I most wanted to ask a world model is "what if I had done something else?" So I pushed it: from one start, imagine 15 steps of a constant push in every direction.
+
+![What if](figures/fig-what-if.svg)
+
+*Figure 8. (a) Imagined (dashed) vs. true (solid) trajectories for 15 steps of constant force in eight directions. (b) The decoded imagined frames at the end. (c) Endpoint error over all held-out episodes and runs, compared with a prediction that ignores the push.*
+
+A 15-step constant push is far longer than any random burst in training (1–3 steps), so this is real extrapolation. The model gets the direction right but stops short. Its endpoint is off by $0.103 \pm 0.010$ (the arena is $1 \times 1$), against $0.457$ if you ignored the push. So it clearly uses the action, but it isn't exact when you take it far from its training data.
+
+Finally, what does the latent space look like inside?
+
+![Latent map](figures/fig-latent-map.svg)
+
+*Figure 9. (a) Held-out latents projected onto their first two principal components, coloured by episode progress. (b) How each principal component correlates with each state variable.*
+
+The biggest directions in the latent mostly encode where the goal and agent are; velocity shows up only in smaller components (PC5–PC6). That's a useful reminder that PCA ranks directions by *variance*, not by importance. Goal location simply varies most across episodes.
+
+---
+
+## Part 5 — What worked and what did not
+
+This is the part I'd want to read first if I were building my own WAM. Every row below is a real experiment.
+
+| Decision | What I tried | What happened | Verdict |
+|---|---|---|---|
+| Training data | expert only vs. 30% random bursts | counterfactual error at 10 steps: $0.112 \rightarrow 0.0072$, even though factual error is *lower* with expert-only data | ✅ **diverse actions** |
+| Imagination horizon $H$ | 1, 5, 10 steps | 10-step counterfactual error $0.0139 / 0.0072 / 0.0057$; one-step error $0.0019 / 0.0019 / 0.0030$ | ⚖️ **trade-off** |
+| Latent consistency | on vs. off | 15-step error $0.0071 \pm 0.0004$ vs. $0.0096 \pm 0.0024$; one-step slightly better without it | ✅ **stability** |
+| Image loss (state as input) | on vs. off | 15-step state error $0.0071$ vs. $0.0074$ | ➖ **not needed** here |
+| Decoder output | sigmoid vs. residual on mean image | sigmoid got stuck; residual learns, but still worse than copying the frame | ⚠️ **pixels stay weak** |
+| Image encoder | average pooling vs. spatial-softmax keypoints | keypoints barely move with state input; track the agent ($R^2 \ge 0.998$) without it | ✅ **only without state** |
+| Diffusion head | linear vs. cosine noise schedule | linear never reaches noise; fixed with cosine + DDPM posterior | 🐛 **bug fixed** |
+| Auxiliary supervision (pixels only) | BC, + current state, + future state | success $17.0\% / 28.4\% / 33.6\%$ | ⚠️ **mostly state supervision** |
+| Few demonstrations | 25 to 400 episodes | WAM trails VLA at 25 episodes ($87\%$ vs. $99.7\%$); more updates close most of the gap | ⏳ **undertraining** |
+
+### Lesson 1: expert-only data hides what actions do
+
+![Exploration](figures/fig-exploration.svg)
+
+*Figure 10. (a) State error after 10 imagined steps as I add more random-action bursts. Green: factual (the recorded actions). Red: counterfactual (random actions, checked against the simulator). Grey: the error of ignoring the actions. (b) The policy doesn't care: success stays at 100%.*
+
+This one surprised me the most. With expert-only data the world model's **factual** error is the *lowest* of all three settings. If that were the only metric you checked, you'd say expert-only data is best. But its **counterfactual** error is 15× worse ($0.112$ vs. $0.0072$).
+
+Why? In expert data, the action is (almost) a function of the state: the expert always does roughly the same thing in the same situation. So the network can predict the future from the state alone, and never learns to read its action input. This is the world-model version of *causal confusion* in imitation learning ([de Haan et al.](https://doi.org/10.48550/arxiv.1905.11979)).
+
+There's a twist I learned later. The expert data *does* contain enough information to identify the physics. A simple affine model of state and action, given the clipping rule, fits the transition to numerical precision from deterministic expert trajectories alone. So the problem is what the *neural* model chooses to learn, not what the data contains. Either way, the practical fix is cheap: mix in a few random actions, and tag them so the policy doesn't imitate them.
+
+> **Takeaway.** Test your world model on actions the expert didn't take. Reconstruction or video quality on held-out demos is a *factual* metric, and it can look great while the model ignores the action. ([AD-WM](https://www.alphaxiv.org/abs/2609.30264) makes the same point for planning.)
+
+### Lesson 2: you get good at the horizon you train on
+
+![Ablations](figures/fig-ablations.svg)
+
+*Figure 11. Each row changes one thing from the full objective (grey). (a) State error after 15 imagined steps. (b) Counterfactual error after 10 random-action steps. (c) Closed-loop success.*
+
+- Training on one-step windows ($H = 1$) gives the same one-step accuracy, but errors pile up: the 10-step counterfactual error doubles.
+- Training on 10-step windows goes the other way: better far ahead, slightly worse one step ahead.
+
+If you plan to imagine $k$ steps ahead, train on windows of about $k$ steps. GR-1 reports the same flavor of result for future-frame prediction. Latent consistency mostly buys *stability* across runs at long horizons. And with the state as an input, the image loss makes no measurable difference to how well the model predicts states.
+
+### Lesson 3: an encoder learns to look only when it has to
+
+![Keypoints](figures/fig-keypoints.svg)
+
+*Figure 12. Spatial-softmax keypoints on a held-out episode. (a) Model that also gets the state: the keypoints sit still near the image center. (b) Model that gets only the image: the keypoints follow the agent and mark both goals. (c) How much the keypoints move (log scale).*
+
+When the robot state is given as input, the network already knows where everything is, so the image encoder has no reason to localize anything: its keypoints barely move. Remove the state, and they lock onto the agent ($R^2 \ge 0.998$ in every run). I like this result because it's a clean picture of *what the training signal forces the network to learn*.
+
+### Lesson 4: prediction helps the policy when the observation hides something
+
+![Policy](figures/fig-policy.svg)
+
+*Figure 13. (a) Success vs. number of demonstrations; open markers train longer to match the update count. (b) State + image input vs. image only. (c) A matched pilot: behavioral cloning, + current-state supervision, + future-state prediction. Each grey line is one run.*
+
+- **With the state as input**, the WAM never meaningfully beats the VLA. Both hit 100%. With only 25 demos the WAM is *worse* (87% vs. 99.7%), but that is mostly undertraining: with matched updates it reaches 96.3% vs. 98.7%.
+- **With pixels only**, the WAM wins every run: **80.3% vs. 36.0%**.
+
+Why does the world model help so much here? This is where honesty matters. Two things change at once when you add the world-model losses: the network gets *state supervision* (it must know where the agent is now) and *future prediction* (it must know where it will be). A matched pilot, with identical data, initialization and updates, pulls them apart: cloning alone gets 17.0%, adding current-state supervision gets 28.4%, and adding future-state prediction gets 33.6%. **Most of the gain is state supervision.** Predicting the future adds a smaller and less consistent bump: it helps in four of five runs.
+
+And about velocity: in the image-only model, a linear readout recovers position from one frame almost perfectly ($R^2 \approx 0.99$) but velocity only partly ($R^2 \approx 0.5$). That makes sense, since velocity isn't in the image. After a few imagined steps the velocity readout improves a lot ($R^2 \approx 0.9$). Tempting as it is to say "imagination recovers the hidden velocity", the honest reading is narrower. Velocity uncertainty shrinks on its own under this physics ($0.8^k$ damping), and the rollout is fed the real actions. The deployed policy also never uses the imagined latents; it re-encodes one frame every step. So the improvement is real, but the mechanism isn't settled. A policy with a short frame history might close much of the gap without any world model.
+
+---
+
+## Part 6 — Where the cost goes
+
+![Efficiency](figures/fig-efficiency.svg)
+
+*Figure 14. (a) Parameters per module. (b) Time for one training step (batch 64). (c) Time to imagine k steps, with and without decoding images, compared with the time for one policy action. Measured on one CPU thread of a laptop.*
+
+- **Acting is free.** WAM and VLA both take 0.42 ms per action, because the deployed policy never calls the world model.
+- **Training is not.** One WAM training step costs 38× a VLA step. Remove the image decoder and the step drops from 2.55 s to 0.27 s (9.5× cheaper), while the parameter count halves. The decoder holds half the parameters and about 90% of the training compute.
+- **Imagination is cheap, pictures aren't.** Ten imagined latent steps with state readouts take 0.28 ms; decoding an image at every step raises that to 12.7 ms.
+
+If you want your WAM to be fast:
+
+1. **Predict states or compact latents before pixels.** That's where the cost is, and in this task pixels didn't even help the state predictions.
+2. **Keep small datasets on the GPU** and build batches by indexing, not with a per-sample loader. Even on a CPU this cut batch assembly from 4.5 ms to 2.6 ms; on a cluster node with one CPU core, the per-sample loader was the bottleneck.
+3. **Roll out in latent space**, and decode only when you actually want to look.
+
+---
+
+## Part 7 — Honest limitations
+
+- **It's a toy.** A 2D point mass with two goals, smooth physics, and (when the state is given) full observability. Contact, occlusion and long horizons, where WAMs should matter most, are absent.
+- **No planning.** The policy acts reactively from the current latent. The world model shapes training, and I use `imagine()` for analysis, but nothing here measures planning.
+- **Privileged supervision.** In the pixel-only setting the WAM still learns from true-state targets during training, and I haven't compared it with a policy that sees a short frame history.
+- **Small numbers of runs.** Three independent runs per configuration (five in the pilot) are enough to see big effects, not small ones.
+
+---
+
+## Part 8 — Try it yourself
+
+Some exercises, in rough order of difficulty. Everything you need is already in the code.
+
+1. **Break it on purpose.** Set `RANDOM_ACTION_PROB=0.0` in `scripts/run_toy.sh` and look at `4_what_if.png` from `visualize_rollout.py`. Do the imagined pushes still fan out?
+2. **Change the horizon.** Train with `--horizon 1` and `--horizon 10` and compare the "what if" plots.
+3. **Plan with the world model.** Sample 64 random action sequences, imagine each with `model.imagine(..., actions=...)`, score each by the distance between the imagined agent and the goal, and execute the first action of the best one. Does this beat the policy when you remove the state input?
+4. **Give the policy memory.** Stack the last two frames as input and rerun the image-only comparison. How much of the WAM's advantage survives?
+5. **Go real.** `collect_data.py` and `test.py` already support Meta-World (`--env metaworld`). What breaks first?
+
+---
+
+## Glossary
+
+- **Behavioral cloning (BC):** training a policy to copy expert actions, as supervised learning.
+- **Counterfactual prediction:** predicting what *would* happen under actions that were not taken.
+- **Factual prediction:** predicting what *did* happen, given the recorded actions.
+- **Imagination / rollout:** applying the dynamics model repeatedly without new observations.
+- **Inverse dynamics:** inferring the action that moved the world from one state to the next.
+- **Latent ($z$):** the network's internal summary vector.
+- **Linear probe / readout:** a single linear layer that reads a property (like position) out of a latent.
+- **MPC (model-predictive control):** planning by imagining candidate action sequences with a model and executing the first action of the best one.
+- **Spatial softmax:** turning a feature map into the expected $(x, y)$ position of its activation.
+- **VLA:** vision-language-action model, a policy that maps images and instructions to actions.
+- **WAM:** world action model, a policy that also predicts how its actions change the world.
+
+## FAQ
+
+**Do I need a GPU?** No. Everything here trains on a laptop CPU; the study ran on single cluster GPUs only to get through 12 experiments × 3 runs quickly.
+
+**Why not just use a big pretrained WAM?** You should, for real robots. But at billions of parameters it's hard to see *why* things work. mini-WAM is for building intuition that you can carry back to the big models.
+
+**Is the world model ever used when the robot acts?** Not in these experiments. It's a training signal and a tool for analysis. Using it to plan is exercise 3.
+
+**What's the difference between "imagined" and "dreamed"?** Imagined uses actions you provide (usually the real ones); dreamed lets the model's own policy pick actions inside its imagination.
+
+---
+
+## Reproducing everything
+
+```sh
+bash scripts/run_toy.sh   # 3 runs: collect, train WAM + VLA, evaluate, test, visualize, summarize
+```
+
+Every experiment is `scripts/run_toy.sh` with **one line** of its configuration block changed:
+
+| Experiment | Change | Results |
 |---|---|---|
 | baseline | none | `docs/results/baseline` |
 | expert-only data | `RANDOM_ACTION_PROB=0.0` | `docs/results/explore-0.0` |
 | more exploration | `RANDOM_ACTION_PROB=0.6` | `docs/results/explore-0.6` |
-| no latent-consistency loss | `LATENT_WEIGHT=0.0` | `docs/results/no-latent` |
+| no latent consistency | `LATENT_WEIGHT=0.0` | `docs/results/no-latent` |
 | no image loss | `IMAGE_WEIGHT=0.0` | `docs/results/no-image` |
 | horizon 1 / 10 | `HORIZON=1` / `HORIZON=10` | `docs/results/horizon-1`, `horizon-10` |
 | fewer demos | `EPISODES=25` / `50` / `100` | `docs/results/episodes-*` |
-| 25 demos, matched steps | `EPISODES=25`, `EPOCHS=225` | `docs/results/episodes-25-matched` |
+| 25 demos, matched updates | `EPISODES=25`, `EPOCHS=225` | `docs/results/episodes-25-matched` |
 | image + language only | `STATE_INPUT=0` | `docs/results/image-only` |
 
-Each results folder has, per run, `wam_eval.json` (imagination and counterfactual errors, readout $R^2$), `wam_test.json` and `vla_test.json` (closed-loop success), plus a `summary.json` with mean ± std. The figures are rebuilt from those files with `python docs/figures/make_figures.py`.
-
-On a single V100, one full experiment (three runs) takes about 15–30 minutes.
+The matched supervision pilot and the affine audit live in `docs/results/supervision-pilot` and `docs/results/research-audit`, with their own READMEs. The efficiency numbers come from `docs/figures/benchmark_efficiency.py`, and every figure is rebuilt by `python docs/figures/make_figures.py`.
 
 ## References
 
-1. Alain, G. & Bengio, Y. *Understanding intermediate layers using linear classifier probes.* [alphaXiv](https://www.alphaxiv.org/abs/1610.01644)
-2. Black, K. et al. *π0: A Vision-Language-Action Flow Model for General Robot Control.* RSS 2025. [doi](https://doi.org/10.15607/rss.2025.xxi.010)
-3. Brohan, A. et al. *RT-2: Vision-Language-Action Models Transfer Web Knowledge to Robotic Control.* 2023. [doi](https://doi.org/10.48550/arxiv.2307.15818)
-4. Chen, J. et al. *MiniWAM: Learning Compact Future Targets for Efficient World-Action Modeling.* 2026. [alphaXiv](https://www.alphaxiv.org/abs/2610.12194)
-5. Chi, C. et al. *Diffusion Policy: Visuomotor Policy Learning via Action Diffusion.* RSS 2023. [doi](https://doi.org/10.15607/rss.2023.xix.026)
-6. de Haan, P., Jayaraman, D. & Levine, S. *Causal Confusion in Imitation Learning.* 2019. [doi](https://doi.org/10.48550/arxiv.1905.11979)
-7. Du, Y. et al. *Learning Universal Policies via Text-Guided Video Generation.* 2023. [doi](https://doi.org/10.52202/075280-0403)
-8. Finn, C. et al. *Deep Spatial Autoencoders for Visuomotor Learning.* ICRA 2016. [doi](https://doi.org/10.1109/icra.2016.7487173)
-9. Ha, D. & Schmidhuber, J. *Recurrent World Models Facilitate Policy Evolution.* 2018. [alphaXiv](https://www.alphaxiv.org/abs/1809.01999)
-10. Hafner, D. et al. *Dream to Control: Learning Behaviors by Latent Imagination.* 2019. [alphaXiv](https://www.alphaxiv.org/abs/1912.01603)
-11. Hansen, N., Su, H. & Wang, X. *TD-MPC2: Scalable, Robust World Models for Continuous Control.* 2023. [alphaXiv](https://www.alphaxiv.org/abs/2310.16828)
-12. Kim, M. J. et al. *OpenVLA: An Open-Source Vision-Language-Action Model.* 2024. [alphaXiv](https://www.alphaxiv.org/abs/2406.09246)
-13. Lipman, Y. et al. *Flow Matching for Generative Modeling.* 2022. [doi](https://doi.org/10.48550/arxiv.2210.02747)
-14. Lu, Z., Zhai, H. et al. *World-Action Models for Robot Learning and Control: A Survey.* 2026. [alphaXiv](https://www.alphaxiv.org/abs/2609.16074)
-15. Molinari, M. et al. *Emergent World Representations in OpenVLA.* 2025. [alphaXiv](https://www.alphaxiv.org/abs/2509.24559)
-16. Nichol, A. & Dhariwal, P. *Improved Denoising Diffusion Probabilistic Models.* 2021. [doi](https://doi.org/10.48550/arxiv.2102.09672)
-17. Qiu, J., Chen, Z. et al. *AD-WM: Action-Discriminative World Models for Counterfactual Model Predictive Control.* 2026. [alphaXiv](https://www.alphaxiv.org/abs/2609.30264)
-18. Wu, H. et al. *Unleashing Large-Scale Video Generative Pre-training for Visual Robot Manipulation* (GR-1). 2023. [doi](https://doi.org/10.48550/arxiv.2312.13139)
-19. Zhu, C. et al. *Unified World Models: Coupling Video and Action Diffusion for Pretraining on Large Robotic Datasets.* RSS 2025. [doi](https://doi.org/10.15607/rss.2025.xxi.015)
+1. Assran, M. et al. *V-JEPA 2: Self-Supervised Video Models Enable Understanding, Prediction and Planning.* 2025. [alphaXiv](https://www.alphaxiv.org/abs/2506.09985)
+2. Cen, J. et al. *WorldVLA: Towards Autoregressive Action World Model.* 2025. [alphaXiv](https://www.alphaxiv.org/abs/2506.21539)
+3. Chen, J. et al. *MiniWAM: Learning Compact Future Targets for Efficient World-Action Modeling.* 2026. [alphaXiv](https://www.alphaxiv.org/abs/2610.12194)
+4. de Haan, P., Jayaraman, D. & Levine, S. *Causal Confusion in Imitation Learning.* 2019. [doi](https://doi.org/10.48550/arxiv.1905.11979)
+5. Huang, S. et al. *Nano World Models: A Minimalist Implementation of Future Video Prediction.* 2026. [alphaXiv](https://www.alphaxiv.org/abs/2605.23993)
+6. Jang, J. et al. *DreamGen: Unlocking Generalization in Robot Learning through Video World Models.* 2025. [alphaXiv](https://www.alphaxiv.org/abs/2505.12705)
+7. Kim, M. J. et al. *Cosmos Policy: Fine-Tuning Video Models for Visuomotor Control and Planning.* 2026. [alphaXiv](https://www.alphaxiv.org/abs/2601.16163)
+8. Li, L. et al. *Causal World Modeling for Robot Control* (LingBot-VA). 2026. [alphaXiv](https://www.alphaxiv.org/abs/2601.21998)
+9. Liao, Y. et al. *Genie Envisioner: A Unified World Foundation Platform for Robotic Manipulation.* 2025. [alphaXiv](https://www.alphaxiv.org/abs/2508.05635)
+10. Lu, Z. et al. *World-Action Models for Robot Learning and Control: A Survey.* 2026. [alphaXiv](https://www.alphaxiv.org/abs/2609.16074)
+11. Qiu, J. et al. *AD-WM: Action-Discriminative World Models for Counterfactual Model Predictive Control.* 2026. [alphaXiv](https://www.alphaxiv.org/abs/2609.30264)
+12. Shen, Q. et al. *World Action Models: A Survey.* 2026. [alphaXiv](https://www.alphaxiv.org/abs/2606.20781)
+13. Wu, H. et al. *Unleashing Large-Scale Video Generative Pre-training for Visual Robot Manipulation* (GR-1). 2023. [alphaXiv](https://www.alphaxiv.org/abs/2312.13139)
+14. Zhang, X., Zeng, X. & Zhang, W. *From World Models to World Action Models: A Concise Tutorial for Robotics.* 2026. [alphaXiv](https://www.alphaxiv.org/abs/2607.00836)
+15. Zhu, C. et al. *Unified World Models: Coupling Video and Action Diffusion for Pretraining on Large Robotic Datasets.* RSS 2025. [doi](https://doi.org/10.15607/rss.2025.xxi.015)
