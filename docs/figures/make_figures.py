@@ -403,7 +403,7 @@ def fig_data_and_state(exps):
     ax.set_xticklabels([str(x) for x in xs])
     ax.minorticks_off()
     ax.set_ylim(70, 102)
-    ax.set_xlabel("demonstration episodes per seed")
+    ax.set_xlabel("demonstration episodes per run")
     ax.set_ylabel("closed-loop success (%)")
     ax.legend(loc="lower right", fontsize=6)
 
