@@ -1,4 +1,4 @@
-"""Train picoWAM (or its VLA baseline) on image, state, action, and text-instruction datasets.
+"""Train pico-WAM (or its VLA baseline) on image, state, action, and text-instruction datasets.
 
 Expected dataset format: .npz with at least:
 
