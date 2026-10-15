@@ -1,8 +1,14 @@
-"""Build the result figures for docs/mini-wam-paper.md.
+"""Build every data figure of the mini-WAM paper.
 
-Reads the per-seed JSON files under docs/results/<experiment>/seed*/ (copied
-from the runs of scripts/run_toy.sh) and writes SVG figures next to this
-script. Every number plotted comes from those files.
+Inputs (all committed):
+    docs/results/<experiment>/seed*/        per-seed evaluation and closed-loop JSON
+                                            files written by scripts/run_toy.sh
+    docs/results/figure-data/               model outputs for the qualitative figures,
+                                            written by docs/figures/export_figure_data.py
+
+Outputs: <name>.pdf (LaTeX paper, docs/paper/) and <name>.svg (Markdown paper)
+next to this script, built at the paper's text width (5.5 in). Every value
+plotted is read from those files; nothing is typed in by hand.
 
     python docs/figures/make_figures.py
 """
@@ -10,42 +16,36 @@ script. Every number plotted comes from those files.
 import glob
 import json
 import os
+import sys
 
 import numpy as np
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+import figstyle as fs  # noqa: E402
+
+fs.use_style()
+import matplotlib.pyplot as plt  # noqa: E402  (after use_style selects the backend)
+from matplotlib.lines import Line2D  # noqa: E402
+
 RESULTS = os.path.join(HERE, "..", "results")
+FIGDATA = os.path.join(RESULTS, "figure-data")
+W = fs.TEXT  # 5.5 in, the paper's \textwidth
 
-# Okabe-Ito colorblind-safe palette
-WAM = "#D55E00"      # vermillion
-VLA = "#0072B2"      # blue
-BASE = "#7F7F7F"     # grey: "copy" / "no-op" reference baselines
-ACCENT = "#009E73"   # green
+# one colour per role, used identically in every figure
+WAM = fs.PALETTE["red"]        # mini-WAM
+VLA = fs.PALETTE["blue"]       # VLA baseline
+FACT = fs.PALETTE["green"]     # factual imagination (real actions)
+DREAM = fs.PALETTE["purple"]   # dreamed (own policy)
+TRUE = "#000000"               # ground truth
+REF = fs.BASELINE              # reference baselines ("nothing changes", "ignore the actions")
 
-plt.rcParams.update({
-    "font.family": "sans-serif",
-    "font.sans-serif": ["Helvetica", "Arial", "DejaVu Sans"],
-    "font.size": 8,
-    "axes.labelsize": 8,
-    "xtick.labelsize": 7,
-    "ytick.labelsize": 7,
-    "legend.fontsize": 7,
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-    "axes.linewidth": 0.6,
-    "lines.linewidth": 1.4,
-    "legend.frameon": False,
-    "svg.fonttype": "none",
-    "savefig.bbox": "tight",
-})
-WIDTH = 6.5  # inches, full text width
+STATE_NAMES = {"agent_x": "agent $x$", "agent_y": "agent $y$", "vel_x": "velocity $v_x$",
+               "vel_y": "velocity $v_y$", "target_x": "goal $g_x$", "target_y": "goal $g_y$"}
 
 
-# ------------------------------------------------------------------ loading
+# ---------------------------------------------------------------- helpers
 
 
 def load_experiment(name):
@@ -60,238 +60,384 @@ def load_experiment(name):
     return seeds
 
 
-def curve(seeds, getter):
-    """Stack a per-seed list-valued metric -> (mean, std, n) over seeds."""
-    rows = [getter(s) for s in seeds]
-    rows = [np.asarray(r, dtype=float) for r in rows if r is not None]
-    if not rows:
-        return None
-    L = min(len(r) for r in rows)
-    a = np.stack([r[:L] for r in rows])
-    return a.mean(0), a.std(0), len(rows)
+def per_seed(seeds, getter):
+    """Array of one scalar per seed."""
+    return np.asarray([float(getter(s)) for s in seeds])
 
 
-def scalar(seeds, getter):
-    vals = []
-    for s in seeds:
-        try:
-            v = getter(s)
-        except (TypeError, KeyError, IndexError):
-            v = None
-        if v is not None:
-            vals.append(float(v))
-    if not vals:
-        return None
-    return float(np.mean(vals)), float(np.std(vals)), len(vals)
+def curves(seeds, getter):
+    """(n_seeds, n_points) array of a list-valued metric."""
+    rows = [np.asarray(getter(s), dtype=float) for s in seeds]
+    n = min(len(r) for r in rows)
+    return np.stack([r[:n] for r in rows])
 
 
-def panel_label(ax, letter):
-    ax.text(-0.16, 1.04, letter, transform=ax.transAxes, fontsize=9, fontweight="bold", va="bottom")
+def finish(fig, name):
+    if os.environ.get("PREVIEW_DIR"):  # optional raster preview for visual checks
+        fig.savefig(os.path.join(os.environ["PREVIEW_DIR"], name + ".png"), dpi=220)
+    fs.save(fig, os.path.join(HERE, name))
 
 
-def band(ax, x, c, color, label, ls="-", marker="o", start=0):
-    m, s, _ = c
-    x = np.asarray(x)[: len(m)]
-    x, m, s = x[start:], m[start:], s[start:]
-    ax.plot(x, m, color=color, ls=ls, marker=marker, ms=2.5, label=label)
-    ax.fill_between(x, m - s, m + s, color=color, alpha=0.2, lw=0)
+def band(ax, x, runs, color, label, ls="-", marker="o"):
+    """Seed mean as a line, ± one standard deviation across seeds as a band."""
+    m, s = runs.mean(0), runs.std(0)
+    ax.plot(x, m, color=color, ls=ls, marker=marker, ms=2.2, lw=1.1, label=label)
+    ax.fill_between(x, m - s, m + s, color=color, alpha=0.18, lw=0)
 
 
-def save(fig, name):
-    path = os.path.join(HERE, name)
-    fig.savefig(path)
-    if os.environ.get("PREVIEW_DIR"):  # optional raster preview for quick checks
-        fig.savefig(os.path.join(os.environ["PREVIEW_DIR"], name.replace(".svg", ".png")), dpi=200)
-    plt.close(fig)
-    print("wrote", os.path.relpath(path))
+def image_axis(ax):
+    """Image panels carry no axes (they are pictures, not plots)."""
+    ax.set_axis_off()
 
 
-# ------------------------------------------------------------------ figures
+# ------------------------------------------------- imagination quality
 
 
 def fig_imagination_quality(base):
-    """(a) factual imagination vs copy baseline, (b) counterfactual vs no-op, (c) image."""
-    fig, axes = plt.subplots(1, 3, figsize=(WIDTH, 2.4))
+    fig, axes = fs.figure_grid(1, 3, width=W, ratio=0.42)
 
     ax = axes[0]
-    k = np.arange(0, 16)
-    # k = 0 is the current state, where "nothing changes" is exact (0 on a log axis)
-    band(ax, k, curve(base, lambda s: s["eval"]["state_nmse_copy"]), BASE, '"nothing changes"', ls="--", marker="s", start=1)
-    band(ax, k, curve(base, lambda s: s["eval"]["state_nmse"]), WAM, "mini-WAM imagination")
+    k = np.arange(1, 16)  # k = 0 is the current state, where "nothing changes" is exact
+    band(ax, k, curves(base, lambda s: s["eval"]["state_nmse_copy"])[:, 1:16], REF, '"nothing changes"', ls="--", marker="s")
+    band(ax, k, curves(base, lambda s: s["eval"]["state_nmse"])[:, 1:16], WAM, "mini-WAM")
     ax.set_yscale("log")
     ax.set_xlabel("imagined steps $k$")
     ax.set_ylabel("state error (normalized MSE)")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.32))
-    panel_label(ax, "a")
 
     ax = axes[1]
     k = np.arange(1, 11)
-    band(ax, k, curve(base, lambda s: s["eval"]["counterfactual"]["noop_nmse"]), BASE, "ignore the actions (no-op)", ls="--", marker="s")
-    band(ax, k, curve(base, lambda s: s["eval"]["counterfactual"]["wam_nmse"]), WAM, "mini-WAM imagination")
+    band(ax, k, curves(base, lambda s: s["eval"]["counterfactual"]["noop_nmse"]), REF, "ignore the actions", ls="--", marker="s")
+    band(ax, k, curves(base, lambda s: s["eval"]["counterfactual"]["wam_nmse"]), WAM, "mini-WAM")
     ax.set_yscale("log")
     ax.set_xlabel("imagined steps $k$ (random actions)")
     ax.set_ylabel("counterfactual error (nMSE)")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.32))
-    panel_label(ax, "b")
 
     ax = axes[2]
-    k = np.arange(0, 16)
-    band(ax, k, curve(base, lambda s: s["eval"]["image_mse_copy"]), BASE, "copy current frame", ls="--", marker="s")
-    band(ax, k, curve(base, lambda s: s["eval"]["image_mse"]), WAM, "mini-WAM decoded imagination")
+    k = np.arange(1, 16)
+    band(ax, k, curves(base, lambda s: s["eval"]["image_mse_copy"])[:, 1:16], REF, "copy current frame", ls="--", marker="s")
+    band(ax, k, curves(base, lambda s: s["eval"]["image_mse"])[:, 1:16], WAM, "mini-WAM (decoded)")
+    ax.set_ylim(0, 0.009)
     ax.set_xlabel("imagined steps $k$")
     ax.set_ylabel("image error (pixel MSE)")
-    ax.set_ylim(bottom=0)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.32))
-    panel_label(ax, "c")
 
-    fig.tight_layout(w_pad=1.5)
-    save(fig, "fig-imagination-quality.svg")
+    for ax in axes:
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.32), ncol=1)
+    fs.panel_labels(axes)
+    finish(fig, "fig-imagination-quality")
+
+
+# --------------------------------------------------- episode strip
+
+
+def fig_episode_strip():
+    d = np.load(os.path.join(FIGDATA, "episode_strip.npz"))
+    rows = [("real", d["real"]), ("decoded $z_t$", d["recon"]),
+            ("imagined\n(real actions)", d["imagined"]), ("dreamed\n(own policy)", d["dreamed"])]
+    t = d["timesteps"]
+    fig, axes = plt.subplots(len(rows), len(t), figsize=(W, 0.60 * W * len(rows) / len(t) + 0.3),
+                             layout="constrained", gridspec_kw={"wspace": 0.02, "hspace": 0.02})
+    for r, (name, frames) in enumerate(rows):
+        for c in range(len(t)):
+            ax = axes[r, c]
+            ax.imshow(frames[c], interpolation="nearest")
+            image_axis(ax)
+            if r == 0:
+                ax.text(0.5, 1.06, f"$t={t[c]}$", transform=ax.transAxes, ha="center", va="bottom", fontsize=7)
+            if c == 0:
+                ax.text(-0.08, 0.5, name, transform=ax.transAxes, ha="right", va="center", fontsize=7)
+    finish(fig, "fig-episode-strip")
+
+
+# --------------------------------------------------- exploration
 
 
 def fig_exploration(exps):
-    """Factual vs counterfactual error and closed-loop success as exploration varies."""
-    xs, names = [], []
-    for p, name in [(0.0, "explore-0.0"), (0.3, "baseline"), (0.6, "explore-0.6")]:
-        if exps.get(name):
-            xs.append(p)
-            names.append(name)
-    if len(xs) < 2:
-        return
+    settings = [(0.0, "explore-0.0"), (0.3, "baseline"), (0.6, "explore-0.6")]
+    xs = np.array([p for p, _ in settings])
+    fig, axes = fs.figure_grid(1, 2, width=W, ratio=0.44)
 
-    def series(getter):
-        vals = [scalar(exps[n], getter) for n in names]
-        return np.array([v[0] for v in vals]), np.array([v[1] for v in vals])
-
-    fig, axes = plt.subplots(1, 2, figsize=(WIDTH * 0.8, 2.6))
     ax = axes[0]
-    for getter, color, label, marker in [
-        (lambda s: s["eval"]["state_nmse"][10], ACCENT, "factual (real actions), $k$=10", "s"),
-        (lambda s: s["eval"]["counterfactual"]["wam_nmse"][9], WAM, "counterfactual (random actions), $k$=10", "o"),
-        (lambda s: s["eval"]["counterfactual"]["noop_nmse"][9], BASE, "ignore the actions (no-op)", "x"),
-    ]:
-        m, sd = series(getter)
-        ax.errorbar(xs, m, yerr=sd, color=color, marker=marker, ms=3.5, capsize=2, label=label,
-                    ls="--" if color == BASE else "-")
+    series = [
+        (lambda s: s["eval"]["counterfactual"]["noop_nmse"][9], REF, "ignore the actions", "x", "--"),
+        (lambda s: s["eval"]["counterfactual"]["wam_nmse"][9], WAM, "counterfactual (random actions)", "o", "-"),
+        (lambda s: s["eval"]["state_nmse"][10], FACT, "factual (real actions)", "s", "-"),
+    ]
+    for getter, color, label, marker, ls in series:
+        vals = np.stack([per_seed(exps[n], getter) for _, n in settings])  # (settings, seeds)
+        ax.errorbar(xs, vals.mean(1), yerr=vals.std(1), color=color, marker=marker, ms=3.5, capsize=2, lw=1.1, ls=ls, label=label)
+        for i, x in enumerate(xs):  # individual seeds
+            ax.scatter(np.full(vals.shape[1], x), vals[i], s=5, color=color, alpha=0.45, lw=0, zorder=3)
     ax.set_yscale("log")
     ax.set_xticks(xs)
     ax.set_xlabel("random-action probability in the data")
-    ax.set_ylabel("imagined state error (nMSE)")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.3))
-    panel_label(ax, "a")
+    ax.set_ylabel("imagined state error, $k=10$")
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.3), ncol=1)
 
     ax = axes[1]
-    for off, (key, color, label) in zip([-0.008, 0.008], [("wam_test", WAM, "mini-WAM"), ("vla_test", VLA, "VLA baseline")]):
-        m, sd = series(lambda s, key=key: s[key]["success_rate"])
-        ax.errorbar(np.array(xs) + off, 100 * m, yerr=100 * sd, color=color, marker="o", ms=3.5, capsize=2, label=label)
+    for off, key, color, label in [(-0.012, "wam_test", WAM, "mini-WAM"), (0.012, "vla_test", VLA, "VLA baseline")]:
+        vals = np.stack([per_seed(exps[n], lambda s, key=key: 100 * s[key]["success_rate"]) for _, n in settings])
+        ax.errorbar(xs + off, vals.mean(1), yerr=vals.std(1), color=color, marker="o", ms=3.5, capsize=2, lw=1.1, label=label)
     ax.set_xticks(xs)
     ax.set_ylim(0, 105)
     ax.set_xlabel("random-action probability in the data")
     ax.set_ylabel("closed-loop success (%)")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.3), ncol=2)
-    panel_label(ax, "b")
 
-    fig.tight_layout(w_pad=1.5)
-    save(fig, "fig-exploration.svg")
+    fs.panel_labels(axes)
+    finish(fig, "fig-exploration")
+
+
+# --------------------------------------------------- ablations
 
 
 def fig_ablations(exps):
-    """Dot plot: each objective/horizon variant vs the baseline on three metrics."""
     variants = [
-        ("baseline", "full objective, $H$=5"),
-        ("no-latent", "no latent-consistency loss"),
+        ("baseline", "full objective ($H=5$)"),
+        ("no-latent", "no latent consistency"),
         ("no-image", "no image loss"),
-        ("horizon-1", "imagination horizon $H$=1"),
-        ("horizon-10", "imagination horizon $H$=10"),
+        ("horizon-1", "horizon $H=1$"),
+        ("horizon-10", "horizon $H=10$"),
     ]
-    variants = [(n, l) for n, l in variants if exps.get(n)]
-    if len(variants) < 2:
-        return
-
     metrics = [
-        ("imagined state error, $k$=15", lambda s: s["eval"]["state_nmse"][15], True),
-        ("counterfactual error, $k$=10", lambda s: s["eval"]["counterfactual"]["wam_nmse"][9], True),
-        ("closed-loop success (%)", lambda s: 100 * s["wam_test"]["success_rate"], False),
-        ("image error, $k$=1", lambda s: s["eval"]["image_mse"][1], False),
+        ("state error, $k=15$", lambda s: s["eval"]["state_nmse"][15]),
+        ("counterfactual error, $k=10$", lambda s: s["eval"]["counterfactual"]["wam_nmse"][9]),
+        ("closed-loop success (%)", lambda s: 100 * s["wam_test"]["success_rate"]),
     ]
-    fig, axes = plt.subplots(1, len(metrics), figsize=(WIDTH, 0.35 * len(variants) + 0.7), sharey=True)
+    fig, axes = fs.figure_grid(1, len(metrics), width=W, ratio=0.36, sharey=True)
     y = np.arange(len(variants))[::-1]
-    for j, (ax, (label, getter, log)) in enumerate(zip(axes, metrics)):
+    for ax, (label, getter) in zip(axes, metrics):
         hi = 0.0
         for yi, (name, _) in zip(y, variants):
-            v = scalar(exps[name], getter)
-            if v is None:
-                continue
-            hi = max(hi, v[0] + v[1])
-            color = BASE if name == "baseline" else WAM
-            ax.errorbar(v[0], yi, xerr=v[1], color=color, marker="o", ms=4, capsize=2, lw=1)
-        base = scalar(exps["baseline"], getter)
-        if base:
-            ax.axvline(base[0], color=BASE, lw=0.6, ls=":")
-        ax.set_xlim(0, 105 if "success" in label else 1.2 * hi)
+            vals = per_seed(exps[name], getter)
+            color = REF if name == "baseline" else WAM
+            ax.errorbar(vals.mean(), yi, xerr=vals.std(), color=color, marker="o", ms=3.5, capsize=2, lw=1.0)
+            ax.scatter(vals, np.full(len(vals), yi), s=6, color=color, alpha=0.45, lw=0, zorder=3)
+            hi = max(hi, vals.max(), vals.mean() + vals.std())
+        ax.axvline(per_seed(exps["baseline"], getter).mean(), color=REF, lw=0.6, ls=":")
+        ax.set_xlim(0, 105 if "success" in label else 1.15 * hi)
         ax.set_xlabel(label)
         ax.set_yticks(y)
-        if j == 0:
-            ax.set_yticklabels([l for _, l in variants])
-        panel_label(ax, "abcd"[j])
-    fig.tight_layout(w_pad=1.0)
-    save(fig, "fig-ablations.svg")
+        ax.grid(axis="y", visible=False)
+        ax.grid(axis="x", visible=True)
+    axes[0].set_yticklabels([l for _, l in variants])
+    axes[0].set_ylabel("training variant")
+    fs.panel_labels(axes)
+    finish(fig, "fig-ablations")
+
+
+# --------------------------------------------------- beliefs
+
+
+def fig_beliefs():
+    d = np.load(os.path.join(FIGDATA, "episode_beliefs.npz"))
+    labels = [str(l) for l in d["labels"]]
+    show = ["agent_x", "agent_y", "vel_x", "vel_y"]
+    fig, axes = fs.figure_grid(1, 4, width=W, ratio=0.34, sharex=True)
+    t = np.arange(len(d["true"]))
+    for ax, name in zip(axes, show):
+        j = labels.index(name)
+        ax.plot(t, d["true"][:, j], color=TRUE, lw=1.4, label="true state")
+        ax.plot(t, d["now"][:, j], color=VLA, lw=1.0, label="read from encoded frame")
+        ax.plot(t, d["imagined"][:, j], color=WAM, lw=1.0, ls="--", label="imagined from $t=0$ (real actions)")
+        ax.plot(t, d["dreamed"][:, j], color=DREAM, lw=1.0, ls=":", label="dreamed from $t=0$ (own policy)")
+        ax.set_ylabel(STATE_NAMES[name])
+        ax.set_xlabel("timestep")
+    handles, names = axes[0].get_legend_handles_labels()
+    fig.legend(handles, names, loc="outside lower center", ncol=2)
+    fs.panel_labels(axes)
+    finish(fig, "fig-beliefs")
+
+
+# --------------------------------------------------- what if
+
+
+def fig_what_if():
+    d = np.load(os.path.join(FIGDATA, "what_if.npz"))
+    names = [str(n) for n in d["names"]]
+    fig = plt.figure(figsize=(W, 0.40 * W), layout="constrained")
+    gs = fig.add_gridspec(1, 3, width_ratios=[1.05, 1.0, 1.25])
+
+    # (a) trajectories in the arena, over the start frame
+    ax = fig.add_subplot(gs[0])
+    ax.imshow(d["start_image"], extent=[0, 1, 0, 1], alpha=0.35, interpolation="nearest")
+    cmap = plt.get_cmap("twilight", 10)
+    for i in range(len(names)):
+        color = TRUE if i == 0 else cmap(i)
+        ax.plot(d["true"][i, :, 0], d["true"][i, :, 1], color=color, lw=0.8, alpha=0.75)
+        ax.plot(d["imagined"][i, :, 0], d["imagined"][i, :, 1], color=color, lw=1.3, ls="--")
+        ax.scatter(d["imagined"][i, -1, 0], d["imagined"][i, -1, 1], color=color, s=7, zorder=4, lw=0)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_aspect("equal")
+    ax.grid(False)
+    ax.set_xlabel("agent $x$")
+    ax.set_ylabel("agent $y$")
+    ax.legend([Line2D([], [], color="0.3", ls="--", lw=1.3), Line2D([], [], color="0.3", lw=0.8)],
+              ["imagined", "true simulator"], loc="upper center", bbox_to_anchor=(0.5, -0.22), ncol=2, fontsize=6)
+
+    # (b) decoded frames after 15 imagined steps, compass layout
+    sub = gs[1].subgridspec(3, 3, wspace=0.04, hspace=0.04)
+    order = {(0, 0): 4, (0, 1): 3, (0, 2): 2, (1, 0): 5, (1, 1): 0, (1, 2): 1, (2, 0): 6, (2, 1): 7, (2, 2): 8}
+    frame_axes = []
+    for (r, c), i in order.items():
+        a = fig.add_subplot(sub[r, c])
+        a.imshow(d["final_frames"][i], interpolation="nearest")
+        image_axis(a)
+        a.text(0.05, 0.95, names[i], transform=a.transAxes, ha="left", va="top", fontsize=5,
+               bbox={"boxstyle": "square,pad=0.15", "fc": "white", "ec": "none", "alpha": 0.8})
+        frame_axes.append(a)
+
+    # (c) endpoint error per push direction, all held-out episodes of all seeds
+    ax_c = fig.add_subplot(gs[2])
+    err, ign = d["endpoint_error"], d["ignore_push_error"]  # (seeds, directions)
+    x = np.arange(len(names))
+    ax_c.bar(x - 0.2, ign.mean(0), 0.4, color=fs.MUTED, edgecolor=REF, lw=0.5, label="ignore the push")
+    ax_c.bar(x + 0.2, err.mean(0), 0.4, yerr=err.std(0), color=WAM, capsize=1.5, error_kw={"lw": 0.6}, label="mini-WAM")
+    ax_c.set_xticks(x)
+    ax_c.set_xticklabels(names, rotation=60, fontsize=6)
+    ax_c.set_ylim(0, 0.68)
+    ax_c.set_ylabel("endpoint error, 15 steps (arena units)")
+    ax_c.set_xlabel("constant push direction")
+    ax_c.legend(loc="upper center", ncol=2, fontsize=6)
+
+    fs.panel_labels([ax, frame_axes[0], ax_c], pad=4.0)
+    finish(fig, "fig-what-if")
+
+
+# --------------------------------------------------- latent map
+
+
+def fig_latent_map():
+    d = np.load(os.path.join(FIGDATA, "latent_map.npz"))
+    short = {"agent_x": "$x$", "agent_y": "$y$", "vel_x": "$v_x$", "vel_y": "$v_y$", "target_x": "$g_x$", "target_y": "$g_y$"}
+    labels = [short[str(l)] for l in d["labels"]]
+    ev = d["explained"]
+    fig, axes = fs.figure_grid(1, 2, width=W, ratio=0.48, gridspec_kw={"width_ratios": [1.0, 1.05]})
+
+    ax = axes[0]
+    sc = ax.scatter(d["xy"][:, 0], d["xy"][:, 1], c=d["progress"], cmap=fs.SEQUENTIAL, s=2, alpha=0.6, lw=0, rasterized=True)
+    ax.plot(d["real_traj"][:, 0], d["real_traj"][:, 1], color=TRUE, lw=1.2, label="encoded (real frames)")
+    ax.plot(d["imagined_traj"][:, 0], d["imagined_traj"][:, 1], color=WAM, lw=1.2, ls="--", label="imagined from $t=0$")
+    ax.set_xlabel(f"PC1 ({ev[0]:.0%} of variance)")
+    ax.set_ylabel(f"PC2 ({ev[1]:.0%} of variance)")
+    ax.grid(False)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=2, fontsize=6)
+    fig.colorbar(sc, ax=ax, label="episode progress", fraction=0.05, pad=0.02)
+
+    ax = axes[1]
+    im = ax.imshow(d["corr"], cmap=fs.DIVERGING, vmin=-1, vmax=1, aspect="auto")
+    ax.set_xticks(range(len(labels)))
+    ax.set_xticklabels(labels)
+    ax.set_xlabel("state variable")
+    ax.set_yticks(range(len(ev)))
+    ax.set_yticklabels([f"PC{i + 1} ({e:.0%})" for i, e in enumerate(ev)])
+    ax.grid(False)
+    for i in range(d["corr"].shape[0]):
+        for j in range(d["corr"].shape[1]):
+            v = d["corr"][i, j]
+            if abs(v) >= 0.5:
+                ax.text(j, i, f"{v:.1f}", ha="center", va="center", fontsize=5.5, color="white" if abs(v) > 0.75 else "black")
+    fig.colorbar(im, ax=ax, label="Pearson correlation", fraction=0.05, pad=0.02)
+
+    fs.panel_labels(axes)
+    finish(fig, "fig-latent-map")
+
+
+# --------------------------------------------------- keypoints
+
+
+def fig_keypoints():
+    runs = [("baseline", "(a) state +\nimage input"), ("image-only", "(b) image\ninput only")]
+    stats = json.load(open(os.path.join(FIGDATA, "keypoint_stats.json")))
+    fig = plt.figure(figsize=(W, 0.23 * W), layout="constrained")
+    gs = fig.add_gridspec(1, 2, width_ratios=[4.0, 1.0])
+    strips = gs[0].subgridspec(2, 8, wspace=0.03, hspace=0.03)
+    cmap = plt.get_cmap("tab20")
+    for r, (name, title) in enumerate(runs):
+        d = np.load(os.path.join(FIGDATA, f"keypoints_{name}.npz"))
+        size = d["frames"].shape[1]
+        for c in range(d["frames"].shape[0]):
+            a = fig.add_subplot(strips[r, c])
+            a.imshow(d["frames"][c], interpolation="nearest")
+            kp = d["keypoints"][c]
+            a.scatter((kp[:, 0] + 1) / 2 * (size - 1), (kp[:, 1] + 1) / 2 * (size - 1),
+                      c=[cmap(i % 20) for i in range(kp.shape[0])], s=7, marker="x", lw=0.7)
+            image_axis(a)
+            if r == 0:
+                a.text(0.5, 1.04, f"$t={d['timesteps'][c]}$", transform=a.transAxes, ha="center", va="bottom", fontsize=6)
+            if c == 0:
+                a.text(-0.1, 0.5, title, transform=a.transAxes, ha="right", va="center", fontsize=6.5)
+
+    ax = fig.add_subplot(gs[1])
+    for i, (name, _) in enumerate(runs):
+        v = np.asarray(stats[name]["spread"])
+        ax.bar(i, np.exp(np.log(v).mean()), 0.6, color=REF if name == "baseline" else WAM, alpha=0.85)  # geometric mean
+        ax.scatter(np.full(len(v), i), v, s=8, color="black", zorder=3, lw=0)
+    ax.set_yscale("log")
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels(["state +\nimage", "image\nonly"], fontsize=6.5)
+    ax.set_ylabel("keypoint movement\n(std of position)")
+
+    fs.panel_labels([ax], labels=["(c)"])
+    finish(fig, "fig-keypoints")
+
+
+# --------------------------------------------------- data and state input
 
 
 def fig_data_and_state(exps):
-    """(a) closed-loop success vs number of demonstrations, (b) with vs without state input."""
-    pts = [(n, name) for n, name in [(25, "episodes-25"), (50, "episodes-50"), (100, "episodes-100"), (400, "baseline")] if exps.get(name)]
-    has_img = bool(exps.get("image-only"))
-    if len(pts) < 2 and not has_img:
-        return
+    pts = [(25, "episodes-25"), (50, "episodes-50"), (100, "episodes-100"), (400, "baseline")]
+    fig, axes = fs.figure_grid(1, 2, width=W, ratio=0.40, gridspec_kw={"width_ratios": [1.5, 1.0]})
 
-    fig, axes = plt.subplots(1, 2, figsize=(WIDTH * 0.75, 2.0), gridspec_kw={"width_ratios": [1.6, 1]})
     ax = axes[0]
-    xs = [n for n, _ in pts]
-    for key, color, label in [("wam_test", WAM, "mini-WAM"), ("vla_test", VLA, "VLA baseline")]:
-        vals = [scalar(exps[name], lambda s, key=key: 100 * s[key]["success_rate"]) for _, name in pts]
-        ax.errorbar(xs, [v[0] for v in vals], yerr=[v[1] for v in vals], color=color, marker="o", ms=3.5,
-                    capsize=2, label=label)
-    if exps.get("episodes-25-matched"):
-        # same 25 episodes, trained ~15x longer to match the baseline's gradient steps
-        for off, (key, color) in zip([0.94, 1.06], [("wam_test", WAM), ("vla_test", VLA)]):
-            v = scalar(exps["episodes-25-matched"], lambda s, key=key: 100 * s[key]["success_rate"])
-            ax.errorbar(25 * off, v[0], yerr=v[1], color=color, marker="o", mfc="white", ms=4, capsize=2, ls="none")
-        ax.plot([], [], color="black", marker="o", mfc="white", ls="none", label="25 episodes, matched steps")
+    xs = np.array([n for n, _ in pts])
+    for off, key, color, label in [(0.96, "wam_test", WAM, "mini-WAM"), (1.04, "vla_test", VLA, "VLA baseline")]:
+        vals = [per_seed(exps[name], lambda s, key=key: 100 * s[key]["success_rate"]) for _, name in pts]
+        ax.errorbar(xs * off, [v.mean() for v in vals], yerr=[v.std() for v in vals], color=color, marker="o", ms=3.5,
+                    capsize=2, lw=1.1, label=label)
+        m = per_seed(exps["episodes-25-matched"], lambda s, key=key: 100 * s[key]["success_rate"])
+        ax.errorbar([25 * off], [m.mean()], yerr=[m.std()], color=color, marker="o", mfc="white", ms=4, capsize=2, ls="none")
+    ax.plot([], [], color="0.3", marker="o", mfc="white", ls="none", label="25 episodes, matched steps")
     ax.set_xscale("log")
     ax.set_xticks(xs)
     ax.set_xticklabels([str(x) for x in xs])
-    ax.set_ylim(0, 105)
-    ax.set_xlabel("demonstration episodes (per seed)")
+    ax.minorticks_off()
+    ax.set_ylim(70, 102)
+    ax.set_xlabel("demonstration episodes per seed")
     ax.set_ylabel("closed-loop success (%)")
-    ax.legend(loc="lower right")
-    panel_label(ax, "a")
+    ax.legend(loc="lower right", fontsize=6)
 
     ax = axes[1]
-    if has_img:
-        groups = [("baseline", "state + image"), ("image-only", "image only")]
-        xpos = np.arange(len(groups))
-        for off, (key, color, label) in zip([-0.17, 0.17], [("wam_test", WAM, "mini-WAM"), ("vla_test", VLA, "VLA baseline")]):
-            vals = [scalar(exps[g], lambda s, key=key: 100 * s[key]["success_rate"]) for g, _ in groups]
-            ax.bar(xpos + off, [v[0] for v in vals], yerr=[v[1] for v in vals], width=0.32, color=color,
-                   label=label, capsize=2, error_kw={"lw": 0.8})
-        ax.set_xticks(xpos)
-        ax.set_xticklabels([l for _, l in groups])
-        ax.set_ylim(0, 105)
-        ax.set_ylabel("closed-loop success (%)")
-        panel_label(ax, "b")
-    else:
-        ax.axis("off")
-    fig.tight_layout(w_pad=1.5)
-    save(fig, "fig-data-and-state.svg")
+    groups = [("baseline", "state + image"), ("image-only", "image only")]
+    xpos = np.arange(len(groups))
+    for off, key, color, label in [(-0.18, "wam_test", WAM, "mini-WAM"), (0.18, "vla_test", VLA, "VLA baseline")]:
+        vals = [per_seed(exps[g], lambda s, key=key: 100 * s[key]["success_rate"]) for g, _ in groups]
+        ax.bar(xpos + off, [v.mean() for v in vals], 0.34, color=color, label=label)
+        for xp, v in zip(xpos, vals):
+            ax.scatter(np.full(len(v), xp + off), v, s=7, color="black", zorder=3, lw=0)
+    ax.set_xticks(xpos)
+    ax.set_xticklabels([l for _, l in groups])
+    ax.set_ylim(0, 125)
+    ax.set_yticks([0, 20, 40, 60, 80, 100])
+    ax.set_ylabel("closed-loop success (%)")
+    ax.legend(loc="upper center", ncol=2, fontsize=6)
+
+    fs.panel_labels(axes)
+    finish(fig, "fig-data-and-state")
 
 
 def main():
-    names = [os.path.basename(p) for p in sorted(glob.glob(os.path.join(RESULTS, "*"))) if os.path.isdir(p)]
+    names = [os.path.basename(p) for p in sorted(glob.glob(os.path.join(RESULTS, "*")))
+             if os.path.isdir(p) and os.path.basename(p) != "figure-data"]
     exps = {n: load_experiment(n) for n in names}
-    print("experiments:", ", ".join(f"{n} ({len(s)} seeds)" for n, s in exps.items()))
     fig_imagination_quality(exps["baseline"])
+    fig_episode_strip()
     fig_exploration(exps)
     fig_ablations(exps)
+    fig_beliefs()
+    fig_what_if()
+    fig_latent_map()
+    fig_keypoints()
     fig_data_and_state(exps)
 
 
