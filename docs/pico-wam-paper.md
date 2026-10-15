@@ -1,10 +1,10 @@
 # Building a World Action Model from Scratch
 
-### A hands-on tutorial with mini-WAM
+### A hands-on tutorial with picoWAM
 
 **Keivalya Pandya**, Northeastern University
 
-*This is the long, friendly version of the [mini-WAM paper (PDF)](paper/mini-wam-paper.pdf). Same experiments, same numbers, a lot more explanation. Code: this repository.*
+*This is the long, friendly version of the [picoWAM paper (PDF)](paper/pico-wam-paper.pdf). Same experiments, same numbers, a lot more explanation. Code: this repository.*
 
 ---
 
@@ -18,7 +18,7 @@ I wrote this for three kinds of readers, and you can skip around:
 | **comfortable with VLAs / imitation learning** | [Part 1](#part-1--vla-world-model-wam) | Part 0 |
 | **a researcher who wants the results** | [Part 5](#part-5--what-worked-and-what-did-not) and [Part 6](#part-6--where-the-cost-goes) | most of Parts 0–3 |
 
-> **TL;DR.** A World Action Model (WAM) is a robot policy that also learns to predict what its actions will do. I built a tiny one, **mini-WAM** (0.75M parameters, ~1,000 lines of PyTorch), trained it on a toy world where I know the true physics, and poked at it until it told me something. Three things stuck with me:
+> **TL;DR.** A World Action Model (WAM) is a robot policy that also learns to predict what its actions will do. I built a tiny one, **picoWAM** (0.75M parameters, ~1,000 lines of PyTorch), trained it on a toy world where I know the true physics, and poked at it until it told me something. Three things stuck with me:
 > 1. **A world model trained only on expert demos looks great and understands actions badly.** Its predictions of what *did* happen are excellent, but its predictions of what *would* happen under other actions are 15× worse. A few random actions in the data fix it.
 > 2. **Predicting the future helps the policy only when the observation hides something.** With the robot state as input: no gain. With pixels only: success jumps from 36% to 80%. A follow-up experiment says most of that comes from teaching the network the *current* state, not from predicting the future.
 > 3. **Pixels are where the cost is.** The image decoder holds half the parameters and ~90% of the training compute.
@@ -35,7 +35,7 @@ If you already train robot policies, skip this. If not, these five ideas are all
 
 **3. A world model** (or *forward model*) answers a different question: *if I am here and I do this, where will I be next?* Engineers have written these by hand for decades. That's what a physics simulator is, and what model-predictive control (MPC) uses to plan. A *learned* world model learns this from data instead.
 
-**4. A latent** is a compact vector the network uses internally to summarize what it sees. In mini-WAM it is 128 numbers, called $z_t$. You can't read it directly, but you can train small "readout" networks to turn it back into things you understand (positions, velocities, pictures).
+**4. A latent** is a compact vector the network uses internally to summarize what it sees. In picoWAM it is 128 numbers, called $z_t$. You can't read it directly, but you can train small "readout" networks to turn it back into things you understand (positions, velocities, pictures).
 
 **5. Imagination (a rollout)** means applying the world model again and again without looking at the real world: from $z_t$ and an action, predict $z_{t+1}$; from that and the next action, predict $z_{t+2}$; and so on. If the predictions stay good for many steps, the model has learned something real about the world.
 
@@ -68,17 +68,17 @@ A recent survey defines WAMs as models that "connect future-state modeling with 
 
 Here's the map I wish someone had handed me when I moved from VLAs to WAMs. Almost every part of a WAM is something you've met before under a different name:
 
-| If you know… | …in mini-WAM it is | File |
+| If you know… | …in picoWAM it is | File |
 |---|---|---|
 | a VLA's vision / language / state encoders | the **observation encoder** that produces the latent $z_t$ | `models/encoders.py`, `models/fusion.py` |
 | a VLA's action head (MLP, diffusion, flow) | the **policy** $\pi(a_t \mid z_t)$, unchanged | `models/action_heads.py` |
 | a simulator / forward model in MPC | the **latent dynamics** $z_{t+1} = f_\theta(z_t, a_t)$ | `models/dynamics_head.py` |
 | a state estimator | the **linear state readout** $\hat s = Wz + b$ | `models/dynamics_head.py` |
 | an autoencoder's decoder | the **image decoder**, which draws any latent | `models/image_decoder.py` |
-| rolling out a model in MPC | **imagination**: apply $f_\theta$ repeatedly | `MiniWAMPolicy.imagine` |
+| rolling out a model in MPC | **imagination**: apply $f_\theta$ repeatedly | `PicoWAMPolicy.imagine` |
 | a linear probe in interpretability | the readout, literally a linear probe trained jointly | `StateReadout` |
 
-> **A note on the name.** An unrelated 2026 paper is also called *MiniWAM* ([Chen et al.](https://www.alphaxiv.org/abs/2610.12194)). It is a 0.25B-parameter model that predicts compact learned future targets. This project (mini-WAM, with a hyphen) is a separate educational build.
+> **A note on the name.** This project started life as *mini-WAM*, the world-model sequel to my [mini-VLA](https://github.com/keivalya/mini-vla). I renamed it **picoWAM** because an unrelated 2026 paper is called *MiniWAM* ([Chen et al.](https://www.alphaxiv.org/abs/2610.12194)), a 0.25B-parameter model that predicts compact learned future targets. Different project, different goals; the new name just keeps them apart.
 
 ---
 
@@ -95,12 +95,12 @@ flowchart LR
     Q4 --- A4["training signal only ✔<br/>planning (MPC, best-of-N)<br/>decode the action from the future<br/>synthetic training data"]
 ```
 
-*Figure 2. The four decisions. Ticks (✔) mark mini-WAM's choices.*
+*Figure 2. The four decisions. Ticks (✔) mark picoWAM's choices.*
 
 Let me walk through each decision in plain words.
 
-1. **What is predicted?** You can predict raw future frames (expensive, but you can look at them), a compressed learned representation (cheap, but harder to inspect), the physical state (only possible when you know it, as in simulation), or nothing at all. mini-WAM predicts the physical state, and pixels as an option.
-2. **How do actions meet the future?** You can generate the action and the future together ("joint prediction"). You can generate the future first, then ask an *inverse dynamics* model which action gets you there ("plan, then act"). Or you can build an explicit forward model that takes *any* action as input. mini-WAM trains jointly *and* has an explicit action-conditioned forward model, which is what makes "what if" questions possible.
+1. **What is predicted?** You can predict raw future frames (expensive, but you can look at them), a compressed learned representation (cheap, but harder to inspect), the physical state (only possible when you know it, as in simulation), or nothing at all. picoWAM predicts the physical state, and pixels as an option.
+2. **How do actions meet the future?** You can generate the action and the future together ("joint prediction"). You can generate the future first, then ask an *inverse dynamics* model which action gets you there ("plan, then act"). Or you can build an explicit forward model that takes *any* action as input. picoWAM trains jointly *and* has an explicit action-conditioned forward model, which is what makes "what if" questions possible.
 3. **Which backbone?** Big systems reuse pretrained video-generation models. I use small MLPs so everything trains on a laptop.
 4. **What is the prediction for?** It can just shape the representation during training (the cheapest option and the most common), rank candidate actions at test time (planning), produce the action directly, or generate fake training data for another policy.
 
@@ -127,17 +127,17 @@ Here are eight WAMs whose code you can download today. They span the whole desig
 | V-JEPA 2-AC | future representations | frozen encoder + 300M predictor | none (planner) | MPC planning |
 | DreamGen | robot videos | fine-tuned video generator | inverse dynamics labels | synthetic data |
 | LingBot-VA | video latents | autoregressive diffusion (5.3B) | inverse dynamics | action decoding, memory |
-| **mini-WAM** | **state, pixels, latents** | **CNN + GRU + MLPs (0.75M)** | **MLP / diffusion / flow head** | **training signal, analysis** |
+| **picoWAM** | **state, pixels, latents** | **CNN + GRU + MLPs (0.75M)** | **MLP / diffusion / flow head** | **training signal, analysis** |
 
-Three of these systems report lessons that mini-WAM reproduces at toy scale, which I found reassuring:
+Three of these systems report lessons that picoWAM reproduces at toy scale, which I found reassuring:
 
-- GR-1 found that predicting a few frames ahead helps more than predicting the very next frame. mini-WAM shows the same horizon trade-off (Part 5).
-- Cosmos Policy fine-tunes its planning model on policy rollouts, *failures included*, before it trusts the predictions. mini-WAM's world model also needs non-expert actions (Part 5).
-- V-JEPA 2-AC plans in representation space instead of generating pixels. In mini-WAM, pixels are where most of the cost goes (Part 6).
+- GR-1 found that predicting a few frames ahead helps more than predicting the very next frame. picoWAM shows the same horizon trade-off (Part 5).
+- Cosmos Policy fine-tunes its planning model on policy rollouts, *failures included*, before it trusts the predictions. picoWAM's world model also needs non-expert actions (Part 5).
+- V-JEPA 2-AC plans in representation space instead of generating pixels. In picoWAM, pixels are where most of the cost goes (Part 6).
 
 ---
 
-## Part 3 — Building mini-WAM, step by step
+## Part 3 — Building picoWAM, step by step
 
 ### 3.1 A toy world built for checking
 
@@ -228,7 +228,7 @@ Two small choices make it work:
 
 ### 3.5 Readouts: making the latent readable
 
-A latent is useless to a human unless you can read it. mini-WAM has two readouts, and both work on *any* latent, encoded from a real frame or imagined:
+A latent is useless to a human unless you can read it. picoWAM has two readouts, and both work on *any* latent, encoded from a real frame or imagined:
 
 - **A linear state readout**, $\hat s = Wz + b$. I made it linear on purpose. If position and velocity can be recovered with a single linear layer, they are explicitly encoded in $z$, and the rows of $W$ tell you which directions mean what.
 - **An image decoder** that turns $z$ back into a $64\times64$ picture. It predicts the *difference from the dataset's average image*, with no sigmoid at the end. Most pixels are static background, so the decoder starts out already drawing the background and spends its capacity on what moves. My first version used a sigmoid, got stuck, and was worse than just predicting the average image.
@@ -268,7 +268,7 @@ with $w_s = 0.5$ and $w_i = w_z = 1$. Delete every term except $\mathcal{L}_{\te
 
 ### 3.7 Imagining and dreaming
 
-Once trained, the model can roll forward in two ways. Both live in one function, `MiniWAMPolicy.imagine`:
+Once trained, the model can roll forward in two ways. Both live in one function, `PicoWAMPolicy.imagine`:
 
 ```python
 z = self.encode_obs(image, text_tokens, state)
@@ -471,7 +471,7 @@ Some exercises, in rough order of difficulty. Everything you need is already in 
 
 **Do I need a GPU?** No. Everything here trains on a laptop CPU; the study ran on single cluster GPUs only to get through 12 experiments × 3 runs quickly.
 
-**Why not just use a big pretrained WAM?** You should, for real robots. But at billions of parameters it's hard to see *why* things work. mini-WAM is for building intuition that you can carry back to the big models.
+**Why not just use a big pretrained WAM?** You should, for real robots. But at billions of parameters it's hard to see *why* things work. picoWAM is for building intuition that you can carry back to the big models.
 
 **Is the world model ever used when the robot acts?** Not in these experiments. It's a training signal and a tool for analysis. Using it to plan is exercise 3.
 
