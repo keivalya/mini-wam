@@ -47,7 +47,7 @@
 \maketitle
 
 \begin{abstract}
-A vision-language-action (VLA) policy learns what to do. A world action model (WAM) also learns what will happen when it does it. Today's WAMs are large video models that few people can train, which makes their design hard to study. We introduce \textbf{picoWAM}, a 0.75M-parameter WAM written from scratch in about 1,000 lines of PyTorch, and use it to walk through the decisions every WAM makes: what to predict, how actions meet the future, which backbone to use, and what the prediction is for at test time. We place eight open-source WAMs on the same map. On a toy navigation world with a true simulator, picoWAM's latent dynamics imagines 15 steps ahead with ${\sim}80\times$ less state error than persistence. Three lessons stand out. Expert-only data hides action effects: counterfactual error grows $15\times$ while factual error even improves. Prediction helps the policy only when the observation hides state: with pixel input, success rises from 36\% to 80\%, and a separate matched pilot suggests that most of such a gain comes from state supervision rather than from dynamics. Pixels dominate the cost: the image decoder holds half the parameters and $90\%$ of the training compute. Code, data and every figure's source are public.
+A vision-language-action (VLA) policy learns what to do. A world action model (WAM) also learns what will happen when it does it. Today's WAMs are large video models that few people can train, which makes their design hard to study. We introduce \textbf{pico-WAM}, a 0.75M-parameter WAM written from scratch in about 1,000 lines of PyTorch, and use it to walk through the decisions every WAM makes: what to predict, how actions meet the future, which backbone to use, and what the prediction is for at test time. We place eight open-source WAMs on the same map. On a toy navigation world with a true simulator, pico-WAM's latent dynamics imagines 15 steps ahead with ${\sim}80\times$ less state error than persistence. Three lessons stand out. Expert-only data hides action effects: counterfactual error grows $15\times$ while factual error even improves. Prediction helps the policy only when the observation hides state: with pixel input, success rises from 36\% to 80\%, and a separate matched pilot suggests that most of such a gain comes from state supervision rather than from dynamics. Pixels dominate the cost: the image decoder holds half the parameters and $90\%$ of the training compute. Code, data and every figure's source are public.
 \end{abstract}
 
 % =====================================================================
@@ -86,7 +86,7 @@ A VLA maps an image, an instruction and the robot state to an action. Nothing in
   \draw[aflow] (a3.south) |- ($(f3.north)+(0,1.2mm)$) -- (f3.north);
   \node[lbl, left=2mm of o3, anchor=east, align=right] {(c) WAM:\\act and predict};
 \end{tikzpicture}
-\caption{\textbf{Three ways to use a model of the world.} (a) A VLA maps the current observation $o_t$ and instruction $\ell$ to an action. (b) A world model maps an observation and an action to the next observation; it predicts but never decides. (c) A WAM shares one representation $z_t$ between a policy and an action-conditioned dynamics model (orange). The dynamics can be rolled forward with any action, so the model can be asked what its own action, or any other, will do. picoWAM implements (c) with a 128-dimensional latent and reads predicted latents out as physical states and images.}
+\caption{\textbf{Three ways to use a model of the world.} (a) A VLA maps the current observation $o_t$ and instruction $\ell$ to an action. (b) A world model maps an observation and an action to the next observation; it predicts but never decides. (c) A WAM shares one representation $z_t$ between a policy and an action-conditioned dynamics model (orange). The dynamics can be rolled forward with any action, so the model can be asked what its own action, or any other, will do. pico-WAM implements (c) with a 128-dimensional latent and reads predicted latents out as physical states and images.}
 \label{fig:paradigms}
 \end{figure}
 
@@ -95,11 +95,10 @@ Open WAMs now reach billions of parameters \citep{liao2025genie,kim2026cosmospol
 We build that WAM. Our contributions are:
 \begin{itemize}\itemsep0pt
   \item \textbf{A map of WAM design decisions}, with eight open-source WAMs placed on it (Figure~\ref{fig:design}, Table~\ref{tab:wams}).
-  \item \textbf{picoWAM}, a from-scratch WAM in which each module added to the VLA is under 100 lines, plus a toy world with a true simulator for counterfactual tests (Section~\ref{sec:build}).
+  \item \textbf{pico-WAM}, a from-scratch WAM in which each module added to the VLA is under 100 lines, plus a toy world with a true simulator for counterfactual tests (Section~\ref{sec:build}).
   \item \textbf{A record of what worked and what did not}, from data and losses to decoder design, measured over independent runs (Section~\ref{sec:lessons}, Table~\ref{tab:lessons}).
   \item \textbf{A cost breakdown} that shows where a small WAM spends parameters and compute (Section~\ref{sec:efficiency}).
 \end{itemize}
-picoWAM began as mini-WAM, a sequel to the mini-VLA project; we renamed it to avoid confusion with the unrelated MiniWAM \citep{chen2026miniwam}.
 
 % =====================================================================
 \section{The WAM design space}
@@ -139,7 +138,7 @@ Every WAM answers four questions (Figure~\ref{fig:design}). Table~\ref{tab:wams}
   \draw[wam, thick, -{Stealth[length=1.7mm]}] (c23.east) -- (c34.west);
   \draw[wam, thick, -{Stealth[length=1.7mm]}] (c34.east) -- (c41.west);
 \end{tikzpicture}
-\caption{\textbf{The four decisions behind every WAM, and picoWAM's path through them (orange).} (1) The prediction target ranges from pixels to compact learned representations, or no future at all. picoWAM predicts the physical state (and, as an option, pixels). (2) Actions and futures can be generated together, the future can be generated first and an inverse-dynamics model can read the action off it, or an explicit forward model can take any action as input. picoWAM combines joint training with an action-conditioned forward model. (3) Backbones range from billion-parameter video diffusion transformers to small MLPs. (4) The prediction can shape the representation during training, rank candidate actions at test time, produce the action directly, or generate data for another policy. picoWAM uses it only as a training signal, the cheapest and most common choice. Table~\ref{tab:wams} places eight open-source WAMs on the same map.}
+\caption{\textbf{The four decisions behind every WAM, and pico-WAM's path through them (orange).} (1) The prediction target ranges from pixels to compact learned representations, or no future at all. pico-WAM predicts the physical state (and, as an option, pixels). (2) Actions and futures can be generated together, the future can be generated first and an inverse-dynamics model can read the action off it, or an explicit forward model can take any action as input. pico-WAM combines joint training with an action-conditioned forward model. (3) Backbones range from billion-parameter video diffusion transformers to small MLPs. (4) The prediction can shape the representation during training, rank candidate actions at test time, produce the action directly, or generate data for another policy. pico-WAM uses it only as a training signal, the cheapest and most common choice. Table~\ref{tab:wams} places eight open-source WAMs on the same map.}
 \label{fig:design}
 \end{figure}
 
@@ -158,17 +157,17 @@ V-JEPA 2-AC \citep{assran2025vjepa2} & future representations & frozen V-JEPA 2 
 DreamGen \citep{jang2025dreamgen} & robot videos & fine-tuned video generation model & inverse dynamics or latent actions label the videos & synthetic training data \\
 LingBot-VA \citep{li2026lingbotva} & video latents, autoregressively & dual-stream diffusion transformer (5.3B), KV cache & inverse dynamics from the predicted future & action decoding; memory \\
 \midrule
-\textbf{picoWAM} (ours) & physical state, pixels, latents & 3-layer CNN + GRU + MLPs (0.75M) & MLP, diffusion or flow head & training signal; analysis \\
+\textbf{pico-WAM} (ours) & physical state, pixels, latents & 3-layer CNN + GRU + MLPs (0.75M) & MLP, diffusion or flow head & training signal; analysis \\
 \bottomrule
 \end{tabularx}
-\caption{\textbf{Eight open-source WAMs on the map of Figure~\ref{fig:design}.} All eight predict some form of the future; they differ in what they predict, how actions are produced, and what the prediction is used for at test time. Two trends are visible. Large systems inherit video-generation backbones and predict latent frames rather than raw pixels. Systems that plan (Cosmos Policy, V-JEPA 2-AC) or decode actions from the future (Genie Envisioner, LingBot-VA) use the prediction at test time, while GR-1, WorldVLA and picoWAM use it only to shape the representation during training. picoWAM keeps every decision at the smallest scale that still exposes it, two to four orders of magnitude below the large systems. Entries summarize each paper's main configuration.}
+\caption{\textbf{Eight open-source WAMs on the map of Figure~\ref{fig:design}.} All eight predict some form of the future; they differ in what they predict, how actions are produced, and what the prediction is used for at test time. Two trends are visible. Large systems inherit video-generation backbones and predict latent frames rather than raw pixels. Systems that plan (Cosmos Policy, V-JEPA 2-AC) or decode actions from the future (Genie Envisioner, LingBot-VA) use the prediction at test time, while GR-1, WorldVLA and pico-WAM use it only to shape the representation during training. pico-WAM keeps every decision at the smallest scale that still exposes it, two to four orders of magnitude below the large systems. Entries summarize each paper's main configuration.}
 \label{tab:wams}
 \end{table}
 
-Three of these systems report lessons that our small model reproduces. GR-1 finds that predicting a few frames ahead helps more than predicting the next frame \citep{wu2023gr1}; picoWAM shows the same horizon trade-off (Section~\ref{sec:lessons}). Cosmos Policy fine-tunes its planning model on policy rollouts, failures included, before trusting its predictions \citep{kim2026cosmospolicy}; picoWAM's world model also needs non-expert actions. V-JEPA 2-AC plans in representation space and avoids generating pixels \citep{assran2025vjepa2}; in picoWAM, pixels are where most of the cost goes (Section~\ref{sec:efficiency}).
+Three of these systems report lessons that our small model reproduces. GR-1 finds that predicting a few frames ahead helps more than predicting the next frame \citep{wu2023gr1}; pico-WAM shows the same horizon trade-off (Section~\ref{sec:lessons}). Cosmos Policy fine-tunes its planning model on policy rollouts, failures included, before trusting its predictions \citep{kim2026cosmospolicy}; pico-WAM's world model also needs non-expert actions. V-JEPA 2-AC plans in representation space and avoids generating pixels \citep{assran2025vjepa2}; in pico-WAM, pixels are where most of the cost goes (Section~\ref{sec:efficiency}).
 
 % =====================================================================
-\section{Building picoWAM}
+\section{Building pico-WAM}
 \label{sec:build}
 
 \begin{figure}[!htbp]
@@ -199,7 +198,7 @@ Three of these systems report lessons that our small model reproduces. GR-1 find
   \draw[flow] (z1) -- (z1out);
   \draw[flow, dashed] (z1.south) to[bend left=40] node[lbl, below] {repeat $k$ times} (dyn.south);
 \end{tikzpicture}
-\caption{\textbf{picoWAM in one picture.} Three small encoders and a fusion MLP turn the image, the instruction and the robot state into one latent $z_t$. Everything else reads from that latent: the action head (MLP, diffusion or flow), a \emph{linear} state readout, and an image decoder. The world model (orange) is a residual MLP that maps $(z, a)$ to the next latent; LayerNorm keeps imagined latents on the scale of encoded ones. Applying $f_\theta$ repeatedly with any action sequence ``imagines'' the future, and the same readouts turn every imagined latent back into a state and a picture. Parameter counts per module appear in Figure~\ref{fig:efficiency}a.}
+\caption{\textbf{pico-WAM in one picture.} Three small encoders and a fusion MLP turn the image, the instruction and the robot state into one latent $z_t$. Everything else reads from that latent: the action head (MLP, diffusion or flow), a \emph{linear} state readout, and an image decoder. The world model (orange) is a residual MLP that maps $(z, a)$ to the next latent; LayerNorm keeps imagined latents on the scale of encoded ones. Applying $f_\theta$ repeatedly with any action sequence ``imagines'' the future, and the same readouts turn every imagined latent back into a state and a picture. Parameter counts per module appear in Figure~\ref{fig:efficiency}a.}
 \label{fig:arch}
 \end{figure}
 
@@ -275,7 +274,7 @@ Few demonstrations & 25 to 400 episodes & WAM trails VLA at 25 episodes ($87\%$ 
 \begin{figure}[!htbp]
 \centering
 \includegraphics{\figpath/fig-imagination-quality.pdf}
-\caption{\textbf{Imagined states are accurate and action-aware; imagined pixels are not.} (a) Factual state error versus horizon for picoWAM and a ``nothing changes'' baseline that repeats the current state. (b) Counterfactual error under random action sequences, compared against the simulator, versus a reference that ignores the actions. (c) Pixel MSE of decoded imagined frames versus copying the current frame, which is a strong baseline because most pixels are static background. Lines are means and bands one standard deviation over three runs; 40 held-out episodes per run.}
+\caption{\textbf{Imagined states are accurate and action-aware; imagined pixels are not.} (a) Factual state error versus horizon for pico-WAM and a ``nothing changes'' baseline that repeats the current state. (b) Counterfactual error under random action sequences, compared against the simulator, versus a reference that ignores the actions. (c) Pixel MSE of decoded imagined frames versus copying the current frame, which is a strong baseline because most pixels are static background. Lines are means and bands one standard deviation over three runs; 40 held-out episodes per run.}
 \label{fig:imagine}
 \end{figure}
 
@@ -295,7 +294,7 @@ Few demonstrations & 25 to 400 episodes & WAM trails VLA at 25 episodes ($87\%$ 
 \label{fig:coverage}
 \end{figure}
 
-\paragraph{The model extrapolates, imperfectly.} Asked to push in one direction for 15 steps, far longer than any training burst, picoWAM moves the agent the right way but stops short (Figure~\ref{fig:whatif}). Its endpoint error is $0.103 \pm 0.010$ arena units, against $0.457$ for a prediction that ignores the push.
+\paragraph{The model extrapolates, imperfectly.} Asked to push in one direction for 15 steps, far longer than any training burst, pico-WAM moves the agent the right way but stops short (Figure~\ref{fig:whatif}). Its endpoint error is $0.103 \pm 0.010$ arena units, against $0.457$ for a prediction that ignores the push.
 
 \begin{figure}[!htbp]
 \centering
@@ -326,7 +325,7 @@ Few demonstrations & 25 to 400 episodes & WAM trails VLA at 25 episodes ($87\%$ 
 \section{Where the cost goes}
 \label{sec:efficiency}
 
-Figure~\ref{fig:efficiency} profiles the trained model. Acting costs the same for WAM and VLA, 0.42\,ms per step, because the deployed policy never calls the dynamics. Training is a different story. One WAM step costs $38\times$ a VLA step, and the image decoder accounts for most of it: removing it cuts the step from 2.55\,s to 0.27\,s and halves the parameters. Imagination itself is cheap. Ten latent steps with state readouts take 0.28\,ms; decoding a frame at every step raises that to 12.7\,ms. Three changes made picoWAM fast enough to run 12 three-run experiments in an afternoon: predict states rather than pixels where possible, keep the dataset on the GPU and index batches instead of looping over samples (4.5\,ms to 2.6\,ms per batch even on a CPU), and roll out in latent space.
+Figure~\ref{fig:efficiency} profiles the trained model. Acting costs the same for WAM and VLA, 0.42\,ms per step, because the deployed policy never calls the dynamics. Training is a different story. One WAM step costs $38\times$ a VLA step, and the image decoder accounts for most of it: removing it cuts the step from 2.55\,s to 0.27\,s and halves the parameters. Imagination itself is cheap. Ten latent steps with state readouts take 0.28\,ms; decoding a frame at every step raises that to 12.7\,ms. Three changes made pico-WAM fast enough to run 12 three-run experiments in an afternoon: predict states rather than pixels where possible, keep the dataset on the GPU and index batches instead of looping over samples (4.5\,ms to 2.6\,ms per batch even on a CPU), and roll out in latent space.
 
 \begin{figure}[!htbp]
 \centering
@@ -338,11 +337,11 @@ Figure~\ref{fig:efficiency} profiles the trained model. Acting costs the same fo
 % =====================================================================
 \section{Limitations}
 
-picoWAM is a teaching and research instrument, not a robot controller. The toy world is fully observed when the state is given, its dynamics are affine away from the walls, and its goal coordinates appear in the state. The policy never uses imagination at test time, so none of our results measure planning. In the pixel-input setting the WAM receives privileged state targets during training, and a history-based baseline is still missing; velocity is hidden in a single frame, and a short frame history may close much of the gap. Our studies use three runs per configuration and five in the pilot, which is enough to see large effects but not small ones.
+pico-WAM is a teaching and research instrument, not a robot controller. The toy world is fully observed when the state is given, its dynamics are affine away from the walls, and its goal coordinates appear in the state. The policy never uses imagination at test time, so none of our results measure planning. In the pixel-input setting the WAM receives privileged state targets during training, and a history-based baseline is still missing; velocity is hidden in a single frame, and a short frame history may close much of the gap. Our studies use three runs per configuration and five in the pilot, which is enough to see large effects but not small ones.
 
 \section{Conclusion}
 
-A WAM is a VLA with a learned simulator that shares its representation. Built from scratch at 0.75M parameters, that simulator imagines accurately, reads out linearly and responds to actions, provided the data contains actions worth responding to. Our experiments point to three practical rules. Collect diverse actions for the world model, even while the policy imitates the expert. Expect prediction to help the policy when the observation hides the state, and test whether plain state supervision explains the gain. Predict compact states or latents before pixels, which is where most of the cost lies. The large open WAMs in Table~\ref{tab:wams} make the same choices at a scale where they are expensive to test; picoWAM makes them cheap to test.
+A WAM is a VLA with a learned simulator that shares its representation. Built from scratch at 0.75M parameters, that simulator imagines accurately, reads out linearly and responds to actions, provided the data contains actions worth responding to. Our experiments point to three practical rules. Collect diverse actions for the world model, even while the policy imitates the expert. Expect prediction to help the policy when the observation hides the state, and test whether plain state supervision explains the gain. Predict compact states or latents before pixels, which is where most of the cost lies. The large open WAMs in Table~\ref{tab:wams} make the same choices at a scale where they are expensive to test; pico-WAM makes them cheap to test.
 
 \paragraph{Reproducibility.} Every figure is regenerated from committed result files by \code{docs/figures/make\_figures.py}; every experiment is \code{scripts/run\_toy.sh} with one configuration line changed. Code: \url{https://github.com/keivalya/pico-wam}.
 
@@ -353,7 +352,6 @@ AI assistance was used to audit code, develop diagnostic experiments, check lite
 \begin{thebibliography}{19}
 \bibitem[Assran et~al.(2025)]{assran2025vjepa2} M. Assran, A. Bardes, D. Fan, et al. V-JEPA 2: Self-supervised video models enable understanding, prediction and planning. arXiv:2506.09985, 2025.
 \bibitem[Cen et~al.(2025)]{cen2025worldvla} J. Cen, C. Yu, H. Yuan, et al. WorldVLA: Towards autoregressive action world model. arXiv:2506.21539, 2025.
-\bibitem[Chen et~al.(2026)]{chen2026miniwam} J. Chen et al. MiniWAM: Learning compact future targets for efficient world-action modeling. arXiv:2610.12194, 2026.
 \bibitem[de Haan et~al.(2019)]{dehaan2019causal} P. de Haan, D. Jayaraman, and S. Levine. Causal confusion in imitation learning. NeurIPS, 2019. arXiv:1905.11979.
 \bibitem[Huang et~al.(2026)]{huang2026nano} S. Huang, P. Kaushik, M. Chen, et al. Nano World Models: A minimalist implementation of future video prediction. arXiv:2605.23993, 2026.
 \bibitem[Jang et~al.(2025)]{jang2025dreamgen} J. Jang, S. Ye, Z. Lin, et al. DreamGen: Unlocking generalization in robot learning through video world models. arXiv:2505.12705, 2025.
