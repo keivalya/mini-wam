@@ -1,14 +1,14 @@
 # Building and checking the manuscript
 
-The authoritative manuscript is `mini-wam-paper.tex`; `docs/mini-wam-paper.md` is the explicitly marked historical tutorial. The verified working PDF is 12 pages including references, within the requested 10–12 pages. It is not formatted for an actual conference submission.
+The authoritative manuscript is `pico-wam-paper.tex`; `docs/pico-wam-paper.md` is the explicitly marked historical tutorial. The verified working PDF is 12 pages including references, within the requested 10–12 pages. It is not formatted for an actual conference submission.
 
 From the repository root:
 
 ```sh
 python3 docs/figures/research_figures.py
-tectonic --keep-logs docs/paper/mini-wam-paper.tex
-pdfinfo docs/paper/mini-wam-paper.pdf
-pdftoppm -scale-to 1600 -png docs/paper/mini-wam-paper.pdf /tmp/mini-wam-paper
+tectonic --keep-logs docs/paper/pico-wam-paper.tex
+pdfinfo docs/paper/pico-wam-paper.pdf
+pdftoppm -scale-to 1600 -png docs/paper/pico-wam-paper.pdf /tmp/pico-wam-paper
 ```
 
 The built-in Codex editor was opened and its compiler attempted. That compiler cannot resolve the external figure assets in this multi-file project. The existing system Tectonic compiler successfully resolves them and produces the PDF; no TeX installation was added. Keep the source open for editing and use the compiled PDF for the complete preview.
