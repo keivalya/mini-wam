@@ -1,4 +1,4 @@
-"""Measure where mini-WAM spends parameters and time.
+"""Measure where picoWAM spends parameters and time.
 
 Uses one trained baseline checkpoint pair (wam.pt, vla.pt, toy.npz from
 scripts/run_toy.sh) and writes docs/results/efficiency/efficiency.json:
@@ -32,7 +32,7 @@ import torch
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", ".."))
 
-from models.wam_policy import MiniWAMPolicy  # noqa: E402
+from models.wam_policy import PicoWAMPolicy  # noqa: E402
 from models.losses import LossWeights, compute_wam_loss  # noqa: E402
 from scripts.train import TrainingDataset  # noqa: E402
 
@@ -81,8 +81,8 @@ def main():
     torch.manual_seed(0)
     os.makedirs(OUT, exist_ok=True)
 
-    wam, _ = MiniWAMPolicy.from_checkpoint(os.path.join(args.run_dir, "wam.pt"))
-    vla, _ = MiniWAMPolicy.from_checkpoint(os.path.join(args.run_dir, "vla.pt"))
+    wam, _ = PicoWAMPolicy.from_checkpoint(os.path.join(args.run_dir, "wam.pt"))
+    vla, _ = PicoWAMPolicy.from_checkpoint(os.path.join(args.run_dir, "vla.pt"))
 
     parts = ["img_encoder", "txt_encoder", "state_encoder", "fusion", "policy_head", "dynamics", "state_readout", "image_decoder"]
     params = {
@@ -121,7 +121,7 @@ def main():
     batch = next(ds.batches(starts, 64, shuffle=False))
     # a WAM that predicts states but no pixels (same config, no image decoder)
     cfg = dict(wam.config, predict_image=False)
-    wam_state_only = MiniWAMPolicy(**cfg)
+    wam_state_only = PicoWAMPolicy(**cfg)
     wam_state_only.load_state_dict({k: v for k, v in wam.state_dict().items() if not k.startswith("image_decoder")}, strict=False)
     params["wam_state_only_total"] = n_params(wam_state_only)
 
