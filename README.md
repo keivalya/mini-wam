@@ -22,7 +22,7 @@ This project intentionally keeps the codebase small (~700 LOC for the core model
 
 > [!TIP]
 > I recommend reading the following to get started with the mini-WAM implementation.
-> - [mini-WAM: Building a World Action Model from Scratch (paper / tutorial)](docs/mini-wam-paper.md)
+> - mini-WAM: Building a World Action Model from Scratch — [PDF](docs/paper/mini-wam-paper.pdf) · [Markdown](docs/mini-wam-paper.md) · [LaTeX source](docs/paper/mini-wam-paper.tex)
 > - Blog: Building a World Action Model from scratch (Basics) — **TBD**
 > - Blog: From VLAs to WAMs (Math, Code, and Intuition) — **TBD**
 
