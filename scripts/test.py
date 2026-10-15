@@ -1,4 +1,4 @@
-"""Test a mini-WAM (or VLA baseline) policy in closed loop (toy env or Meta-World MT1).
+"""Test a picoWAM (or VLA baseline) policy in closed loop (toy env or Meta-World MT1).
 
 With --save-video, every frame of a WAM rollout shows what the model sees
 and what it is thinking:
@@ -18,12 +18,12 @@ import argparse
 import numpy as np
 import torch
 
-from models.wam_policy import MiniWAMPolicy
+from models.wam_policy import PicoWAMPolicy
 from utils.tokenizer import SimpleTokenizer
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Test a mini-WAM policy in closed loop")
+    parser = argparse.ArgumentParser(description="Test a picoWAM policy in closed loop")
 
     parser.add_argument("--checkpoint", type=str, default="checkpoints/model.pt")
     parser.add_argument("--env", type=str, default=None, choices=["toy", "metaworld"],
@@ -96,7 +96,7 @@ def main():
     device = torch.device(args.device)
 
     print(f"[test] Loading checkpoint from {args.checkpoint}")
-    model, ckpt = MiniWAMPolicy.from_checkpoint(args.checkpoint, device=device)
+    model, ckpt = PicoWAMPolicy.from_checkpoint(args.checkpoint, device=device)
     tokenizer = SimpleTokenizer(vocab=ckpt["vocab"])
     size = model.config["image_size"]
 

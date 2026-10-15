@@ -8,7 +8,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from scripts.train import TrainingDataset, split_episodes
-from models.wam_policy import MiniWAMPolicy
+from models.wam_policy import PicoWAMPolicy
 from envs.toy_point_env import ToyPointEnv
 from utils.tokenizer import SimpleTokenizer
 
@@ -49,7 +49,7 @@ def main():
     for condition in ['bc','current','future']:
         torch.manual_seed(args.seed);np.random.seed(args.seed)
         # Same full initialization ensures encoder/head weights match exactly.
-        model=MiniWAMPolicy(vocab_size=max(data.vocab.values())+1,state_dim=6,action_dim=2,
+        model=PicoWAMPolicy(vocab_size=max(data.vocab.values())+1,state_dim=6,action_dim=2,
           use_state_input=False,predict_state=True,predict_image=False).to(args.device)
         model.set_state_stats(data.states[mask].mean(0),data.states[mask].std(0))
         optim=torch.optim.Adam(model.parameters(),lr=1e-3);history=[];begin=time.time()

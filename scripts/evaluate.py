@@ -1,4 +1,4 @@
-"""Offline evaluation of a trained mini-WAM world model on held-out episodes.
+"""Offline evaluation of a trained picoWAM world model on held-out episodes.
 
 Questions this answers (all on episodes the model never trained on):
 
@@ -27,7 +27,7 @@ import os
 import numpy as np
 import torch
 
-from models.wam_policy import MiniWAMPolicy
+from models.wam_policy import PicoWAMPolicy
 
 
 def parse_args():
@@ -51,7 +51,7 @@ def resolve_device(device):
 
 def load_model_and_data(checkpoint, dataset_path=None, device="cpu"):
     device = resolve_device(device)
-    model, ckpt = MiniWAMPolicy.from_checkpoint(checkpoint, device=device)
+    model, ckpt = PicoWAMPolicy.from_checkpoint(checkpoint, device=device)
     data = dict(np.load(dataset_path or ckpt["dataset_path"], allow_pickle=True))
     return model, ckpt, data
 

@@ -1,4 +1,4 @@
-"""Train mini-WAM (or its VLA baseline) on image, state, action, and text-instruction datasets.
+"""Train picoWAM (or its VLA baseline) on image, state, action, and text-instruction datasets.
 
 Expected dataset format: .npz with at least:
 
@@ -33,7 +33,7 @@ import os
 import numpy as np
 import torch
 
-from models.wam_policy import MiniWAMPolicy
+from models.wam_policy import PicoWAMPolicy
 from models.losses import LossWeights, compute_wam_loss
 
 
@@ -368,7 +368,7 @@ def main():
     state_dim = full.states.shape[1]
     action_dim = full.actions.shape[1]
 
-    model = MiniWAMPolicy(
+    model = PicoWAMPolicy(
         vocab_size=vocab_size,
         state_dim=state_dim,
         action_dim=action_dim,
