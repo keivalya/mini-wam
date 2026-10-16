@@ -2,7 +2,7 @@
 
 Inputs (all committed):
     docs/results/<experiment>/seed*/        per-seed evaluation and closed-loop JSON
-                                            files written by scripts/run_toy.sh
+                                            files written by scripts/run_toy.sh (point-mass study)
     docs/results/figure-data/               model outputs for the qualitative figures,
                                             written by docs/figures/export_figure_data.py
 
@@ -102,23 +102,23 @@ def fig_imagination_quality(base):
     band(ax, k, curves(base, lambda s: s["eval"]["state_nmse"])[:, 1:16], WAM, "pico-WAM")
     ax.set_yscale("log")
     ax.set_xlabel("imagined steps $k$")
-    ax.set_ylabel("state error (normalized MSE)")
+    ax.set_ylabel("state error, nMSE")
 
     ax = axes[1]
     k = np.arange(1, 11)
     band(ax, k, curves(base, lambda s: s["eval"]["counterfactual"]["noop_nmse"]), REF, "ignore the actions", ls="--", marker="s")
     band(ax, k, curves(base, lambda s: s["eval"]["counterfactual"]["wam_nmse"]), WAM, "pico-WAM")
     ax.set_yscale("log")
-    ax.set_xlabel("imagined steps $k$ (random actions)")
-    ax.set_ylabel("counterfactual error (nMSE)")
+    ax.set_xlabel("imagined steps $k$, random actions")
+    ax.set_ylabel("counterfactual error, nMSE")
 
     ax = axes[2]
     k = np.arange(1, 16)
     band(ax, k, curves(base, lambda s: s["eval"]["image_mse_copy"])[:, 1:16], REF, "copy current frame", ls="--", marker="s")
-    band(ax, k, curves(base, lambda s: s["eval"]["image_mse"])[:, 1:16], WAM, "pico-WAM (decoded)")
+    band(ax, k, curves(base, lambda s: s["eval"]["image_mse"])[:, 1:16], WAM, "pico-WAM, decoded")
     ax.set_ylim(0, 0.009)
     ax.set_xlabel("imagined steps $k$")
-    ax.set_ylabel("image error (pixel MSE)")
+    ax.set_ylabel("image error, pixel MSE")
 
     for ax in axes:
         ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.32), ncol=1)
@@ -132,7 +132,7 @@ def fig_imagination_quality(base):
 def fig_episode_strip():
     d = np.load(os.path.join(FIGDATA, "episode_strip.npz"))
     rows = [("real", d["real"]), ("decoded $z_t$", d["recon"]),
-            ("imagined\n(real actions)", d["imagined"]), ("dreamed\n(own policy)", d["dreamed"])]
+            ("imagined,\nreal actions", d["imagined"]), ("dreamed,\nown policy", d["dreamed"])]
     t = d["timesteps"]
     fig, axes = plt.subplots(len(rows), len(t), figsize=(W, 0.60 * W * len(rows) / len(t) + 0.3),
                              layout="constrained", gridspec_kw={"wspace": 0.02, "hspace": 0.02})
@@ -159,8 +159,8 @@ def fig_exploration(exps):
     ax = axes[0]
     series = [
         (lambda s: s["eval"]["counterfactual"]["noop_nmse"][9], REF, "ignore the actions", "x", "--"),
-        (lambda s: s["eval"]["counterfactual"]["wam_nmse"][9], WAM, "counterfactual (random actions)", "o", "-"),
-        (lambda s: s["eval"]["state_nmse"][10], FACT, "factual (real actions)", "s", "-"),
+        (lambda s: s["eval"]["counterfactual"]["wam_nmse"][9], WAM, "counterfactual, random actions", "o", "-"),
+        (lambda s: s["eval"]["state_nmse"][10], FACT, "factual, real actions", "s", "-"),
     ]
     for getter, color, label, marker, ls in series:
         vals = np.stack([per_seed(exps[n], getter) for _, n in settings])  # (settings, seeds)
@@ -180,7 +180,7 @@ def fig_exploration(exps):
     ax.set_xticks(xs)
     ax.set_ylim(0, 105)
     ax.set_xlabel("random-action probability in the data")
-    ax.set_ylabel("closed-loop success (%)")
+    ax.set_ylabel("closed-loop success, %")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.3), ncol=2)
 
     fs.panel_labels(axes)
@@ -192,7 +192,7 @@ def fig_exploration(exps):
 
 def fig_ablations(exps):
     variants = [
-        ("baseline", "full objective ($H=5$)"),
+        ("baseline", "full objective, $H=5$"),
         ("no-latent", "no latent consistency"),
         ("no-image", "no image loss"),
         ("horizon-1", "horizon $H=1$"),
@@ -201,7 +201,7 @@ def fig_ablations(exps):
     metrics = [
         ("state error, $k=15$", lambda s: s["eval"]["state_nmse"][15]),
         ("counterfactual error, $k=10$", lambda s: s["eval"]["counterfactual"]["wam_nmse"][9]),
-        ("closed-loop success (%)", lambda s: 100 * s["wam_test"]["success_rate"]),
+        ("closed-loop success, %", lambda s: 100 * s["wam_test"]["success_rate"]),
     ]
     fig, axes = fs.figure_grid(1, len(metrics), width=W, ratio=0.36, sharey=True)
     y = np.arange(len(variants))[::-1]
@@ -238,8 +238,8 @@ def fig_beliefs():
         j = labels.index(name)
         ax.plot(t, d["true"][:, j], color=TRUE, lw=1.4, label="true state")
         ax.plot(t, d["now"][:, j], color=VLA, lw=1.0, label="read from encoded frame")
-        ax.plot(t, d["imagined"][:, j], color=WAM, lw=1.0, ls="--", label="imagined from $t=0$ (real actions)")
-        ax.plot(t, d["dreamed"][:, j], color=DREAM, lw=1.0, ls=":", label="dreamed from $t=0$ (own policy)")
+        ax.plot(t, d["imagined"][:, j], color=WAM, lw=1.0, ls="--", label="imagined from $t=0$, real actions")
+        ax.plot(t, d["dreamed"][:, j], color=DREAM, lw=1.0, ls=":", label="dreamed from $t=0$, own policy")
         ax.set_ylabel(STATE_NAMES[name])
         ax.set_xlabel("timestep")
     handles, names = axes[0].get_legend_handles_labels()
@@ -296,7 +296,7 @@ def fig_what_if():
     ax_c.set_xticks(x)
     ax_c.set_xticklabels(names, rotation=60, fontsize=6)
     ax_c.set_ylim(0, 0.68)
-    ax_c.set_ylabel("endpoint error, 15 steps (arena units)")
+    ax_c.set_ylabel("endpoint error, arena units")
     ax_c.set_xlabel("constant push direction")
     ax_c.legend(loc="upper center", ncol=2, fontsize=6)
 
@@ -316,10 +316,10 @@ def fig_latent_map():
 
     ax = axes[0]
     sc = ax.scatter(d["xy"][:, 0], d["xy"][:, 1], c=d["progress"], cmap=fs.SEQUENTIAL, s=2, alpha=0.6, lw=0, rasterized=True)
-    ax.plot(d["real_traj"][:, 0], d["real_traj"][:, 1], color=TRUE, lw=1.2, label="encoded (real frames)")
+    ax.plot(d["real_traj"][:, 0], d["real_traj"][:, 1], color=TRUE, lw=1.2, label="encoded real frames")
     ax.plot(d["imagined_traj"][:, 0], d["imagined_traj"][:, 1], color=WAM, lw=1.2, ls="--", label="imagined from $t=0$")
-    ax.set_xlabel(f"PC1 ({ev[0]:.0%} of variance)")
-    ax.set_ylabel(f"PC2 ({ev[1]:.0%} of variance)")
+    ax.set_xlabel(f"PC1, {ev[0]:.0%} of variance")
+    ax.set_ylabel(f"PC2, {ev[1]:.0%} of variance")
     ax.grid(False)
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=2, fontsize=6)
     fig.colorbar(sc, ax=ax, label="episode progress", fraction=0.05, pad=0.02)
@@ -330,7 +330,7 @@ def fig_latent_map():
     ax.set_xticklabels(labels)
     ax.set_xlabel("state variable")
     ax.set_yticks(range(len(ev)))
-    ax.set_yticklabels([f"PC{i + 1} ({e:.0%})" for i, e in enumerate(ev)])
+    ax.set_yticklabels([f"PC{i + 1}, {e:.0%}" for i, e in enumerate(ev)])
     ax.grid(False)
     for i in range(d["corr"].shape[0]):
         for j in range(d["corr"].shape[1]):
@@ -347,7 +347,7 @@ def fig_latent_map():
 
 
 def fig_keypoints():
-    runs = [("baseline", "(a) state +\nimage input"), ("image-only", "(b) image\ninput only")]
+    runs = [("baseline", "state +\nimage input"), ("image-only", "image\ninput only")]
     stats = json.load(open(os.path.join(FIGDATA, "keypoint_stats.json")))
     fig = plt.figure(figsize=(W, 0.23 * W), layout="constrained")
     gs = fig.add_gridspec(1, 2, width_ratios=[4.0, 1.0])
@@ -367,6 +367,7 @@ def fig_keypoints():
                 a.text(0.5, 1.04, f"$t={d['timesteps'][c]}$", transform=a.transAxes, ha="center", va="bottom", fontsize=6)
             if c == 0:
                 a.text(-0.1, 0.5, title, transform=a.transAxes, ha="right", va="center", fontsize=6.5)
+                a.text(-0.1, 1.04, "ab"[r], transform=a.transAxes, ha="right", va="bottom", fontsize=7, fontweight="bold")
 
     ax = fig.add_subplot(gs[1])
     for i, (name, _) in enumerate(runs):
@@ -376,9 +377,9 @@ def fig_keypoints():
     ax.set_yscale("log")
     ax.set_xticks([0, 1])
     ax.set_xticklabels(["state +\nimage", "image\nonly"], fontsize=6.5)
-    ax.set_ylabel("keypoint movement\n(std of position)")
+    ax.set_ylabel("keypoint movement,\nstd of position")
 
-    fs.panel_labels([ax], labels=["(c)"])
+    fs.panel_labels([ax], labels=["c"])
     finish(fig, "fig-keypoints")
 
 
@@ -404,7 +405,7 @@ def fig_data_and_state(exps):
     ax.minorticks_off()
     ax.set_ylim(70, 102)
     ax.set_xlabel("demonstration episodes per run")
-    ax.set_ylabel("closed-loop success (%)")
+    ax.set_ylabel("closed-loop success, %")
     ax.legend(loc="lower right", fontsize=6)
 
     ax = axes[1]
@@ -419,7 +420,7 @@ def fig_data_and_state(exps):
     ax.set_xticklabels([l for _, l in groups])
     ax.set_ylim(0, 125)
     ax.set_yticks([0, 20, 40, 60, 80, 100])
-    ax.set_ylabel("closed-loop success (%)")
+    ax.set_ylabel("closed-loop success, %")
     ax.legend(loc="upper center", ncol=2, fontsize=6)
 
     fs.panel_labels(axes)
@@ -450,7 +451,7 @@ def fig_policy(exps):
     ax.minorticks_off()
     ax.set_ylim(70, 102)
     ax.set_xlabel("demonstration episodes per run")
-    ax.set_ylabel("closed-loop success (%)")
+    ax.set_ylabel("closed-loop success, %")
     ax.legend(loc="lower right", fontsize=5.5)
 
     ax = axes[1]
@@ -465,7 +466,7 @@ def fig_policy(exps):
     ax.set_xticklabels([l for _, l in groups])
     ax.set_ylim(0, 125)
     ax.set_yticks([0, 25, 50, 75, 100])
-    ax.set_ylabel("closed-loop success (%)")
+    ax.set_ylabel("closed-loop success, %")
     ax.legend(loc="upper center", ncol=2, fontsize=5.5)
 
     ax = axes[2]
@@ -481,7 +482,7 @@ def fig_policy(exps):
     ax.set_xticklabels([l for _, l in conds], fontsize=6)
     ax.set_xlim(-0.3, 2.3)
     ax.set_ylim(0, 45)
-    ax.set_ylabel("pixel-input success (%)")
+    ax.set_ylabel("pixel-input success, %")
     ax.legend(loc="lower right", fontsize=5.5)
 
     fs.panel_labels(axes)
@@ -512,10 +513,10 @@ def fig_efficiency():
             left += w
     ax.set_yticks(y)
     ax.set_yticklabels([m for m, _ in models], fontsize=6.5)
-    ax.set_xlabel("parameters (thousands)")
+    ax.set_xlabel("parameters, thousands")
     ax.grid(axis="y", visible=False)
     ax.grid(axis="x", visible=True)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.45, -0.32), ncol=2, fontsize=5.5)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.45, -0.42), ncol=2, fontsize=5.5)
 
     # (b) one optimizer step
     ax = axes[1]
@@ -525,7 +526,7 @@ def fig_efficiency():
     ax.set_yscale("log")
     ax.set_xticks(range(3))
     ax.set_xticklabels([n for n, _, _ in names], fontsize=6.5)
-    ax.set_ylabel("training step (ms, batch 64)")
+    ax.set_ylabel("training step, ms")
 
     # (c) imagination cost vs horizon
     ax = axes[2]
@@ -537,8 +538,8 @@ def fig_efficiency():
     ax.set_yscale("log")
     ax.set_xticks(ks)
     ax.set_xlabel("imagined steps $k$")
-    ax.set_ylabel("latency (ms, batch 1)")
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.3), ncol=1, fontsize=5.5)
+    ax.set_ylabel("latency, ms")
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.4), ncol=1, fontsize=5.5)
 
     fs.panel_labels(axes)
     finish(fig, "fig-efficiency")
@@ -610,7 +611,7 @@ def fig_toy_world():
     ax.set_ylabel("action")
     ax.legend([Line2D([], [], color=TRUE, lw=1.0), Line2D([], [], color=VLA, lw=1.0, ls="--"),
                plt.Rectangle((0, 0), 1, 1, color=WAM, alpha=0.18)], ["$a_x$", "$a_y$", "random burst"],
-              loc="upper center", bbox_to_anchor=(0.5, -0.38), ncol=3, fontsize=5.5)
+              loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=3, fontsize=5.5)
 
     fs.panel_labels([first, ax], pad=7.0)
     finish(fig, "fig-toy-world")
@@ -618,7 +619,7 @@ def fig_toy_world():
 
 def main():
     names = [os.path.basename(p) for p in sorted(glob.glob(os.path.join(RESULTS, "*")))
-             if os.path.isdir(p) and os.path.basename(p) not in ("figure-data", "efficiency", "research-audit", "supervision-pilot")]
+             if os.path.isdir(p) and os.path.basename(p) not in ("figure-data", "efficiency", "research-audit", "supervision-pilot", "pusht")]
     exps = {n: load_experiment(n) for n in names}
     fig_imagination_quality(exps["baseline"])
     fig_episode_strip()

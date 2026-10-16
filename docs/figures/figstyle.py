@@ -161,14 +161,14 @@ def figure_grid(nrows: int = 1, ncols: int = 2, width: float = TEXT, ratio: floa
 
 
 def panel_labels(axes, labels=None, weight: str = "bold", pad: float = 2.0):
-    """Label panels (a), (b), ... above each axes' top-left corner.
+    """Label panels a, b, ... (bold, no parentheses) above each axes' top-left corner.
 
     Panel letters are how prose names a part of a figure ("as Fig. 2b shows").
     Without them a multi-panel figure can only be referred to by position,
     which breaks the moment a panel moves.
     """
     flat = np.ravel(np.asarray(axes, dtype=object)).tolist()
-    labels = labels or [f"({chr(ord('a') + i)})" for i in range(len(flat))]
+    labels = labels or [chr(ord('a') + i) for i in range(len(flat))]
     for ax, text in zip(flat, labels):
         ax.annotate(
             text,
