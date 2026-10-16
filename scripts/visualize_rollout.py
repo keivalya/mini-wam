@@ -380,8 +380,8 @@ def save_dream_video(model, ep, imag, dream, out_dir, gif=False):
     frames = [
         np.concatenate([
             label(to_np_img(ep["images"][t]), f"real t={t}"),
-            label(to_np_img(imag["image"][0, t]), "imagined (real actions)"),
-            label(to_np_img(dream["image"][0, t]), "dreamed (own policy)"),
+            label(to_np_img(imag["image"][0, t]), "imagined"),  # under the real actions
+            label(to_np_img(dream["image"][0, t]), "dreamed"),   # its own policy acting
         ], axis=1)
         for t in range(imag["image"].shape[1])
     ]

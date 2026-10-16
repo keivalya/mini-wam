@@ -12,9 +12,9 @@ Its example task is **Push-T**, the benchmark from [Diffusion Policy](https://di
 > pico-WAM is a research and teaching implementation, not a production system. A VLA learns `image_t + language + state_t → action_t`; pico-WAM learns `image_t + language + state_t → action_t + state_t+1 + image_t+1`. (Inspired by, and extending, [mini-VLA](https://github.com/keivalya/mini-vla).)
 
 <div align="center">
-  <img src="./assets/pusht_dream.gif" alt="real Push-T episode, predicted future, and policy-driven rollout side by side">
+  <img src="./assets/pusht_dream.gif" alt="A real Push-T episode next to pico-WAM's imagined and dreamed versions of it">
   <br>
-  <em>Left: a real Push-T episode. Middle: pico-WAM's open-loop prediction under the real actions. Right: its rollout when its own policy chooses the actions.</em>
+  <em>Left: a real Push-T episode from the held-out human demonstrations. Middle, imagined: what pico-WAM predicts from the first frame alone when it is given the actions the person actually took. Right, dreamed: what it predicts when its own policy chooses every action inside its imagination.</em>
 </div>
 
 The codebase is intentionally small (the whole model package is under 1,000 lines) so that,
