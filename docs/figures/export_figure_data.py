@@ -1,19 +1,22 @@
 """Export the data behind the paper's qualitative figures.
 
-Loads trained checkpoints (one directory per seed, each holding wam.pt and
-toy.npz as written by scripts/run_toy.sh) and saves exactly what the figures
-show to docs/results/figure-data/. The figures are then drawn from those
-files only (docs/figures/make_figures.py), so every pixel and every curve can
-be traced back to a model output.
+Loads one run's trained checkpoints (one directory per seed, each holding
+wam.pt and the run's <env>.npz, as written by scripts/run.sh) and saves
+exactly what the figures show. The figures are then drawn from those files
+only (docs/figures/make_figures.py), so every pixel and every curve can be
+traced back to a model output.
 
-    python docs/figures/export_figure_data.py \\
-        --baseline /path/to/baseline   # contains seed0/, seed1/, seed2/
-        --image-only /path/to/image-only
+    python docs/figures/export_figure_data.py --run-dir results/pusht --name baseline \\
+        --out docs/results/pusht/figure-data
 
+Episode views, what-if pushes and the latent map come from seed 0; keypoint
+tracking scores and what-if errors cover every seed. Keypoint scores of
+several runs (e.g. baseline and pixel-input) collect in one keypoint_stats.json.
 Everything is computed on held-out episodes (the checkpoint's val_episodes).
 """
 
 import argparse
+import glob
 import json
 import os
 import sys
@@ -24,11 +27,9 @@ import torch
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", ".."))
 
-from envs.toy_point_env import ToyPointEnv  # noqa: E402
-from scripts.evaluate import load_model_and_data, get_episode, encode_episode  # noqa: E402
+from scripts.evaluate import load_model_and_data, get_episode, encode_episode, make_simulator  # noqa: E402
 
 OUT = os.path.join(HERE, "..", "results", "figure-data")
-SEEDS = [0, 1, 2]
 STRIP_FRAMES = 8
 WHATIF_HORIZON = 15
 
@@ -39,10 +40,17 @@ def to_uint8(x):
     return (np.moveaxis(x, -3, -1) * 255).round().astype(np.uint8)
 
 
-def load(run_dir, seed):
-    d = os.path.join(run_dir, f"seed{seed}")
-    model, ckpt, data = load_model_and_data(os.path.join(d, "wam.pt"), os.path.join(d, "toy.npz"))
-    return model, ckpt, data
+def load(seed_dir):
+    data_path = [p for p in glob.glob(os.path.join(seed_dir, "*.npz"))][0]
+    return load_model_and_data(os.path.join(seed_dir, "wam.pt"), data_path)
+
+
+def positions(states, env_name):
+    """What the figures track: the agent, and on Push-T also the block (unit square, y up)."""
+    out = {"agent": states[..., 0:2]}
+    if env_name == "pusht":
+        out["block"] = states[..., 4:6]
+    return out
 
 
 @torch.no_grad()
@@ -79,10 +87,10 @@ def export_episode_views(model, ckpt, data):
     )
 
 
-def push_plans(horizon):
-    """No-op plus constant unit pushes in 8 compass directions: (9, horizon, 2)."""
+def push_plans(horizon, scale=1.0):
+    """No-op plus constant pushes of size `scale` in 8 compass directions: (9, horizon, 2)."""
     angles = np.deg2rad(np.arange(0, 360, 45))
-    dirs = np.concatenate([np.zeros((1, 2)), np.stack([np.cos(angles), np.sin(angles)], 1)])
+    dirs = np.concatenate([np.zeros((1, 2)), scale * np.stack([np.cos(angles), np.sin(angles)], 1)])
     return np.repeat(dirs[:, None, :], horizon, axis=1).astype(np.float32), ["no-op"] + [f"{a}°" for a in range(0, 360, 45)]
 
 
@@ -99,10 +107,10 @@ def imagine_plans(model, ep, t, plans):
 
 
 @torch.no_grad()
-def export_what_if(models):
+def export_what_if(models, env_name):
     """Constant-push counterfactuals: one example (seed 0) + endpoint errors for all seeds."""
-    sim = ToyPointEnv()
-    plans, names = push_plans(WHATIF_HORIZON)
+    sim, _, scale = make_simulator(env_name)
+    plans, names = push_plans(WHATIF_HORIZON, scale)
 
     model, ckpt, data = models[0]
     ep = get_episode(data, ckpt["val_episodes"][0])
@@ -118,25 +126,33 @@ def export_what_if(models):
         names=np.asarray(names),
     )
 
-    # endpoint error (Euclidean distance of agent position after the push) for
-    # every held-out episode start of every seed
-    errors = np.zeros((len(models), len(plans)))
-    ignore = np.zeros((len(models), len(plans)))  # reference: predict the no-op endpoint for every push
+    # endpoint error (Euclidean distance after the push, unit square) for every
+    # held-out episode start of every seed: the agent, and on Push-T the block
+    tracked = list(positions(np.zeros((1, 8)), env_name))
+    errors = {k: np.zeros((len(models), len(plans))) for k in tracked}
+    ignore = {k: np.zeros((len(models), len(plans))) for k in tracked}  # reference: the no-op endpoint for every push
     counts = []
     for i, (model, ckpt, data) in enumerate(models):
-        per_ep, per_ep_ignore = [], []
+        per_ep = {k: [] for k in tracked}
+        per_ep_ignore = {k: [] for k in tracked}
         for e in ckpt["val_episodes"]:
             ep = get_episode(data, e)
             s0 = ep["states"][0].cpu().numpy()
-            pred = imagine_plans(model, ep, 0, plans)["state"][:, -1, :2].cpu().numpy()
-            true = np.stack([sim.simulate(s0, p)[-1, :2] for p in plans])
-            per_ep.append(np.linalg.norm(pred - true, axis=1))
-            per_ep_ignore.append(np.linalg.norm(true[0][None] - true, axis=1))
-        errors[i] = np.mean(per_ep, axis=0)
-        ignore[i] = np.mean(per_ep_ignore, axis=0)
-        counts.append(len(per_ep))
+            pred = positions(imagine_plans(model, ep, 0, plans)["state"][:, -1].cpu().numpy(), env_name)
+            true = positions(np.stack([sim.simulate(s0, p)[-1] for p in plans]), env_name)
+            for k in tracked:
+                per_ep[k].append(np.linalg.norm(pred[k] - true[k], axis=1))
+                per_ep_ignore[k].append(np.linalg.norm(true[k][0][None] - true[k], axis=1))
+        for k in tracked:
+            errors[k][i] = np.mean(per_ep[k], axis=0)
+            ignore[k][i] = np.mean(per_ep_ignore[k], axis=0)
+        counts.append(len(per_ep["agent"]))
 
-    np.savez_compressed(os.path.join(OUT, "what_if.npz"), endpoint_error=errors, ignore_push_error=ignore, n_episodes=np.asarray(counts), **example)
+    extra = {}
+    for k in tracked:
+        prefix = "" if k == "agent" else "block_"
+        extra[prefix + "endpoint_error"], extra[prefix + "ignore_push_error"] = errors[k], ignore[k]
+    np.savez_compressed(os.path.join(OUT, "what_if.npz"), n_episodes=np.asarray(counts), **extra, **example)
 
 
 @torch.no_grad()
@@ -175,31 +191,33 @@ def export_latent_map(model, ckpt, data):
 
 
 @torch.no_grad()
-def keypoint_stats(model, ckpt, data):
+def keypoint_stats(model, ckpt, data, env_name):
     """
-    How well do the spatial-softmax keypoints track the agent?
+    How well do the spatial-softmax keypoints track the agent (and on Push-T the block)?
 
     For each keypoint, the squared correlation between its x (y) coordinate and
-    the agent's x (y) position over all held-out frames; the score is the best
+    the object's x (y) position over all held-out frames; the score is the best
     keypoint's mean of the two. Also returns the keypoints' mean spatial spread.
     """
-    kps, pos = [], []
+    kps, states = [], []
     for e in ckpt["val_episodes"]:
         ep = get_episode(data, e)
         kps.append(model.img_encoder.keypoints(ep["images"]).cpu().numpy())   # (T+1, K, 2), x right, y down
-        pos.append(ep["states"][:, :2].cpu().numpy())                          # (T+1, 2), y up
-    K, A = np.concatenate(kps), np.concatenate(pos)
-    r2x = np.array([np.corrcoef(K[:, k, 0], A[:, 0])[0, 1] ** 2 for k in range(K.shape[1])])
-    r2y = np.array([np.corrcoef(K[:, k, 1], A[:, 1])[0, 1] ** 2 for k in range(K.shape[1])])
-    score = np.nan_to_num((r2x + r2y) / 2)
-    spread = K.std(axis=0).mean()
-    return float(score.max()), float(spread)
+        states.append(ep["states"].cpu().numpy())                              # positions y up
+    K = np.concatenate(kps)
+    scores = {}
+    for name, P in positions(np.concatenate(states), env_name).items():
+        r2x = np.array([np.corrcoef(K[:, k, 0], P[:, 0])[0, 1] ** 2 for k in range(K.shape[1])])
+        r2y = np.array([np.corrcoef(K[:, k, 1], P[:, 1])[0, 1] ** 2 for k in range(K.shape[1])])
+        scores[name] = float(np.nan_to_num((r2x + r2y) / 2).max())
+    return scores, float(K.std(axis=0).mean())
 
 
 @torch.no_grad()
-def export_keypoints(runs):
+def export_keypoints(runs, env_name):
     """Example frames (seed 0) and tracking scores (all seeds) for each run."""
-    stats = {}
+    path = os.path.join(OUT, "keypoint_stats.json")
+    stats = json.load(open(path)) if os.path.exists(path) else {}
     for name, models in runs.items():
         model, ckpt, data = models[0]
         ep = get_episode(data, ckpt["val_episodes"][0])
@@ -212,33 +230,40 @@ def export_keypoints(runs):
             keypoints=kp,
             timesteps=cols,
         )
-        scores = [keypoint_stats(*m) for m in models]
+        scores = [keypoint_stats(*m, env_name) for m in models]
         stats[name] = {
-            "tracking_r2": [s[0] for s in scores],
+            "tracking_r2": [s[0]["agent"] for s in scores],
             "spread": [s[1] for s in scores],
         }
-    with open(os.path.join(OUT, "keypoint_stats.json"), "w") as f:
+        if env_name == "pusht":
+            stats[name]["block_tracking_r2"] = [s[0]["block"] for s in scores]
+    with open(path, "w") as f:
         json.dump(stats, f, indent=2)
     return stats
 
 
 def main():
+    global OUT
     parser = argparse.ArgumentParser()
-    parser.add_argument("--baseline", required=True)
-    parser.add_argument("--image-only", required=True)
+    parser.add_argument("--run-dir", required=True, help="A run's results directory with seed*/wam.pt")
+    parser.add_argument("--name", required=True, help="Name of the run in keypoint_stats.json (e.g. baseline)")
+    parser.add_argument("--out", default=OUT)
+    parser.add_argument("--keypoints-only", action="store_true", help="Only export keypoints (e.g. for a pixel-input run)")
     args = parser.parse_args()
 
+    OUT = args.out
     os.makedirs(OUT, exist_ok=True)
-    baseline = [load(args.baseline, s) for s in SEEDS]
-    image_only = [load(args.image_only, s) for s in SEEDS]
+    models = [load(d) for d in sorted(glob.glob(os.path.join(args.run_dir, "seed*")))]
+    env_name = models[0][1]["env"]
 
-    export_episode_views(*baseline[0])
-    export_what_if(baseline)
-    export_latent_map(*baseline[0])
-    stats = export_keypoints({"baseline": baseline, "image-only": image_only})
+    if not args.keypoints_only:
+        export_episode_views(*models[0])
+        export_what_if(models, env_name)
+        export_latent_map(*models[0])
+    stats = export_keypoints({args.name: models}, env_name)
 
     for f in sorted(os.listdir(OUT)):
-        print("wrote", os.path.join("docs/results/figure-data", f))
+        print("wrote", os.path.join(OUT, f))
     print(json.dumps(stats, indent=2))
 
 

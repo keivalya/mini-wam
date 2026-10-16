@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # End-to-end pico-WAM experiment, repeated over several seeds:
-#   for each seed: collect -> train WAM -> train VLA baseline -> evaluate -> closed-loop test
-#   then: visualize the first seed, and summarize mean ± std over seeds
+#   for each seed: data -> train WAM -> train VLA baseline -> evaluate -> closed-loop test
+#                  (Push-T: also the WAM planning with its world model)
+#   then: visualize the first seed, Push-T extras (linear-model baseline, figure
+#   data, compute costs), and summarize mean ± std over seeds
+# MODE=supervision runs the matched-supervision pilot instead (scripts/supervision_ablation.py).
 #
 # Usage: bash scripts/run.sh                (from the repo root; Push-T)
 #        bash scripts/run_toy.sh            (the paper's point-mass study)
@@ -12,7 +15,10 @@ set -euo pipefail
 # ======================= experiment configuration =======================
 # Each experiment in the study changes one of these lines (and nothing else).
 ENV_NAME="${ENV_NAME:-pusht}"            # pusht or toy
-PUSHT_DATA="${PUSHT_DATA:-lerobot}"      # pusht: lerobot (206 human demos) or expert (scripted, with random bursts)
+PUSHT_DATA="${PUSHT_DATA:-lerobot}"      # pusht: lerobot (human demos), expert (scripted, with random bursts) or mixed (both)
+DEMOS="${DEMOS:-206}"                    # pusht: how many of LeRobot's 206 human demos to use (the first N)
+MODE="${MODE:-pipeline}"                 # pipeline, or supervision (the matched-supervision pilot)
+PLAN="${PLAN:-1}"                        # pusht: also test the WAM planning with its world model (scripts/plan.py)
 case "$ENV_NAME" in
   pusht) DEFAULT_EPISODES=200; DEFAULT_MAX_STEPS=300; DEFAULT_RANDOM_ACTION_PROB=0.1 ;;
   toy)   DEFAULT_EPISODES=400; DEFAULT_MAX_STEPS=80;  DEFAULT_RANDOM_ACTION_PROB=0.3 ;;
@@ -86,26 +92,56 @@ export PYTHONUNBUFFERED=1
 
 echo "[run] host=$(hostname) python=$($PYV --version) torch=$($PYV -c 'import torch; print(torch.__version__, torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu")')"
 echo "[run] cpus: $(nproc) slurm_job=${SLURM_JOB_ID:-none}"
-echo "[run] config: ENV_NAME=$ENV_NAME PUSHT_DATA=$PUSHT_DATA SEEDS='$SEEDS' EPOCHS=$EPOCHS EPISODES=$EPISODES MAX_STEPS=$MAX_STEPS RANDOM_ACTION_PROB=$RANDOM_ACTION_PROB HORIZON=$HORIZON STATE_WEIGHT=$STATE_WEIGHT IMAGE_WEIGHT=$IMAGE_WEIGHT LATENT_WEIGHT=$LATENT_WEIGHT STATE_INPUT=$STATE_INPUT ACTION_HEAD=$ACTION_HEAD TEST_EPISODES=$TEST_EPISODES"
+echo "[run] config: ENV_NAME=$ENV_NAME PUSHT_DATA=$PUSHT_DATA DEMOS=$DEMOS MODE=$MODE PLAN=$PLAN SEEDS='$SEEDS' EPOCHS=$EPOCHS EPISODES=$EPISODES MAX_STEPS=$MAX_STEPS RANDOM_ACTION_PROB=$RANDOM_ACTION_PROB HORIZON=$HORIZON STATE_WEIGHT=$STATE_WEIGHT IMAGE_WEIGHT=$IMAGE_WEIGHT LATENT_WEIGHT=$LATENT_WEIGHT STATE_INPUT=$STATE_INPUT ACTION_HEAD=$ACTION_HEAD TEST_EPISODES=$TEST_EPISODES"
 
 STATE_FLAG=""
 [ "$STATE_INPUT" = "0" ] && STATE_FLAG="--no_state_input"
+TORCH_DEVICE="$DEVICE"   # scripts that take a torch device name, not "auto"
+[ "$DEVICE" = "auto" ] && TORCH_DEVICE="$($PYV -c 'import torch; print("cuda" if torch.cuda.is_available() else "cpu")')"
+
+# 1. data: LeRobot's human demos (the same for every seed; the seed changes the
+#    train/val split and the initialization), a fresh scripted collection per
+#    seed, or both merged
+get_data() {  # get_data <dir> <seed>
+  local R="$1" SEED="$2" DEMO_FLAG=""
+  [ "$DEMOS" != "206" ] && DEMO_FLAG="--episodes $DEMOS"
+  if [ "$ENV_NAME" = "pusht" ] && [ "$PUSHT_DATA" != "expert" ]; then
+    $PYV -m scripts.download_pusht $DEMO_FLAG --output-path "$R/lerobot.npz" | tail -7
+  fi
+  if [ "$ENV_NAME" = "toy" ] || [ "$PUSHT_DATA" != "lerobot" ]; then
+    $PYV -m scripts.collect_data --env "$ENV_NAME" --episodes "$EPISODES" --max-steps "$MAX_STEPS" \
+      --seed $((42 + 1000 * SEED)) --random-action-prob "$RANDOM_ACTION_PROB" \
+      --output-path "$R/collected.npz" | tail -3
+  fi
+  if [ -f "$R/lerobot.npz" ] && [ -f "$R/collected.npz" ]; then
+    $PYV -m scripts.merge_datasets "$R/lerobot.npz" "$R/collected.npz" --output-path "$R/$ENV_NAME.npz"
+    rm "$R/lerobot.npz" "$R/collected.npz"
+  else
+    mv "$R"/lerobot.npz "$R/$ENV_NAME.npz" 2>/dev/null || mv "$R/collected.npz" "$R/$ENV_NAME.npz"
+  fi
+}
 
 rm -rf "$OUT"
+
+if [ "$MODE" = "supervision" ]; then
+  for SEED in $SEEDS; do
+    R="$OUT/seed-$SEED"
+    mkdir -p "$R"
+    echo "[run] ===== supervision pilot, seed $SEED ====="
+    get_data "$R" "$SEED"
+    $PYV -m scripts.supervision_ablation --dataset "$R/$ENV_NAME.npz" --seed "$SEED" --epochs "$EPOCHS" \
+      --device "$TORCH_DEVICE" --output "$R/ablation" | grep -E "RESULT"
+  done
+  $PYV -m scripts.summarize_supervision --root "$OUT" --seeds "$(echo $SEEDS | wc -w)"
+  echo "[run] done"
+  exit 0
+fi
+
 for SEED in $SEEDS; do
   R="$OUT/seed$SEED"
   mkdir -p "$R"
   echo "[run] ===== seed $SEED ====="
-
-  # 1. data: LeRobot's human demos (the same for every seed; the seed changes the
-  #    train/val split and the initialization), or a fresh collection per seed
-  if [ "$ENV_NAME" = "pusht" ] && [ "$PUSHT_DATA" = "lerobot" ]; then
-    $PYV -m scripts.download_pusht --output-path "$R/$ENV_NAME.npz" | tail -7
-  else
-    $PYV -m scripts.collect_data --env "$ENV_NAME" --episodes "$EPISODES" --max-steps "$MAX_STEPS" \
-      --seed $((42 + 1000 * SEED)) --random-action-prob "$RANDOM_ACTION_PROB" \
-      --output-path "$R/$ENV_NAME.npz" | tail -3
-  fi
+  get_data "$R" "$SEED"
 
   # 2. WAM and the VLA baseline (same data, same action head, same seed)
   $PYV -m scripts.train --dataset-path "$R/$ENV_NAME.npz" --model_type wam --action_head "$ACTION_HEAD" \
@@ -124,6 +160,10 @@ for SEED in $SEEDS; do
     --max-steps "$MAX_STEPS" --device cpu --json-out "$R/wam_test.json" | tail -1
   $PYV -m scripts.test --checkpoint "$R/vla.pt" --episodes "$TEST_EPISODES" --seed $((10000 + 1000 * SEED)) \
     --max-steps "$MAX_STEPS" --device cpu --json-out "$R/vla_test.json" | tail -1
+  if [ "$ENV_NAME" = "pusht" ] && [ "$PLAN" = "1" ]; then
+    $PYV -m scripts.test --checkpoint "$R/wam.pt" --planner mpc --episodes "$TEST_EPISODES" --seed $((10000 + 1000 * SEED)) \
+      --max-steps "$MAX_STEPS" --device "$TORCH_DEVICE" --json-out "$R/wam_mpc_test.json" | tail -1
+  fi
 done
 
 # ---- 5. look inside the world model (first seed)
@@ -133,7 +173,15 @@ VIS_FLAGS="--video"
 [ "$ENV_NAME" = "pusht" ] && VIS_FLAGS="--video --gif --horizon 80"
 $PYV -m scripts.visualize_rollout --checkpoint "$OUT/seed$FIRST_SEED/wam.pt" --out-dir "$VIS_DIR" $VIS_FLAGS --device "$DEVICE"
 
-# ---- 6. mean ± std over seeds
+# ---- 6. Push-T extras: a linear-model baseline of the dynamics, the data behind
+#         the paper's qualitative figures, and parameter and runtime costs (CPU)
+if [ "$ENV_NAME" = "pusht" ]; then
+  $PYV -m scripts.pusht_dynamics_audit --run-dir "$OUT" | tail -5
+  $PYV docs/figures/export_figure_data.py --run-dir "$OUT" --name run --out "$OUT/figure-data" | grep -E "wrote" | wc -l | sed 's/^/[run] figure-data files: /'
+  $PYV docs/figures/benchmark_efficiency.py --run-dir "$OUT/seed$FIRST_SEED" --out "$OUT/efficiency" > /dev/null && echo "[run] efficiency: $OUT/efficiency/efficiency.json"
+fi
+
+# ---- 7. mean ± std over seeds
 $PYV -m scripts.summarize_runs --root "$OUT"
 
 echo "[run] done"

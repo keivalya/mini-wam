@@ -169,7 +169,8 @@ def evaluate(model, data, episodes, max_horizon=15):
 
     std = model.state_std.cpu().numpy()
     results = {"horizon": [], "n": [], "state_nmse": [], "state_nmse_copy": [],
-               "image_mse": [], "image_mse_copy": [], "state_r2": []}
+               "image_mse": [], "image_mse_copy": [], "state_r2": [],
+               "state_nmse_per_dim": [], "state_nmse_copy_per_dim": []}
 
     for k in range(K + 1):
         d = per_k[k]
@@ -181,10 +182,12 @@ def evaluate(model, data, episodes, max_horizon=15):
         results["horizon"].append(k)
         results["n"].append(len(true))
         results["state_nmse_copy"].append(float((((copy - true) / std) ** 2).mean()))
+        results["state_nmse_copy_per_dim"].append((((copy - true) / std) ** 2).mean(0).tolist())
 
         if d["pred"]:
             pred = torch.stack(d["pred"]).cpu().numpy()
             results["state_nmse"].append(float((((pred - true) / std) ** 2).mean()))
+            results["state_nmse_per_dim"].append((((pred - true) / std) ** 2).mean(0).tolist())
             results["state_r2"].append([None if np.isnan(r) else float(r) for r in r2_per_dim(pred, true)])
         if d["img"]:
             results["image_mse"].append(float(torch.stack(d["img"]).mean()))
@@ -230,6 +233,8 @@ def evaluate_counterfactuals(model, data, episodes, env_name="toy", horizon=10, 
 
     err_wam = np.zeros(horizon)
     err_noop = np.zeros(horizon)
+    dim_wam = np.zeros((horizon, len(dims)))    # the same errors, per state variable
+    dim_noop = np.zeros((horizon, len(dims)))
     count = 0
 
     for e in episodes:
@@ -253,12 +258,17 @@ def evaluate_counterfactuals(model, data, episodes, env_name="toy", horizon=10, 
 
             err_wam += (((pred - truth) / std) ** 2).mean(axis=(0, 2))
             err_noop += (((noop - truth) / std) ** 2).mean(axis=(0, 2))
+            dim_wam += (((pred - truth) / std) ** 2).mean(axis=0)
+            dim_noop += (((noop - truth) / std) ** 2).mean(axis=0)
             count += 1
 
     return {
         "horizon": list(range(1, horizon + 1)),
         "wam_nmse": (err_wam / count).tolist(),
         "noop_nmse": (err_noop / count).tolist(),
+        "wam_nmse_per_dim": (dim_wam / count).tolist(),
+        "noop_nmse_per_dim": (dim_noop / count).tolist(),
+        "dims": dims,
         "n_starts": count,
         "n_plans": n_plans,
         "action_scale": scale,

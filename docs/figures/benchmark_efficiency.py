@@ -1,7 +1,8 @@
 """Measure where pico-WAM spends parameters and time.
 
-Uses one trained baseline checkpoint pair (wam.pt, vla.pt, toy.npz from
-scripts/run_toy.sh) and writes docs/results/efficiency/efficiency.json:
+Uses one trained baseline checkpoint pair (wam.pt, vla.pt and the run's
+<env>.npz, from scripts/run.sh) and writes efficiency.json (by default to
+docs/results/efficiency/):
 
     parameters   per module, WAM and VLA
     latency      ms per call (batch 1) for act(), one latent dynamics step,
@@ -74,12 +75,13 @@ def per_sample_batch(ds, idx):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--run-dir", required=True, help="Directory with wam.pt, vla.pt and toy.npz")
+    parser.add_argument("--run-dir", required=True, help="Directory with wam.pt, vla.pt and the run's dataset (.npz)")
     parser.add_argument("--threads", type=int, default=1)
+    parser.add_argument("--out", default=OUT)
     args = parser.parse_args()
     torch.set_num_threads(args.threads)
     torch.manual_seed(0)
-    os.makedirs(OUT, exist_ok=True)
+    os.makedirs(args.out, exist_ok=True)
 
     wam, _ = PicoWAMPolicy.from_checkpoint(os.path.join(args.run_dir, "wam.pt"))
     vla, _ = PicoWAMPolicy.from_checkpoint(os.path.join(args.run_dir, "vla.pt"))
@@ -91,7 +93,8 @@ def main():
     }
     params["wam_total"], params["vla_total"] = n_params(wam), n_params(vla)
 
-    ds = TrainingDataset(os.path.join(args.run_dir, "toy.npz"), horizon=5)
+    data_path = [os.path.join(args.run_dir, f) for f in sorted(os.listdir(args.run_dir)) if f.endswith(".npz")][0]
+    ds = TrainingDataset(data_path, horizon=5)
     ds.to(torch.device("cpu"))
     i0 = int(ds.starts[0])
     img = ds.t_images[i0 : i0 + 1].float() / 255.0
@@ -149,7 +152,7 @@ def main():
         "parameters": params, "latency_ms": latency, "train_step_ms": train_step, "batch_assembly_ms": batching,
         "notes": "Median wall time per call; batch 1 for inference, batch 64 for training steps and batch assembly.",
     }
-    with open(os.path.join(OUT, "efficiency.json"), "w") as f:
+    with open(os.path.join(args.out, "efficiency.json"), "w") as f:
         json.dump(result, f, indent=2)
     print(json.dumps(result, indent=2))
 

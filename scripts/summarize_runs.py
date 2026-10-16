@@ -53,6 +53,7 @@ def main():
     evals = [load(os.path.join(d, "wam_eval.json")) for d in seed_dirs]
     wam_tests = [load(os.path.join(d, "wam_test.json")) for d in seed_dirs]
     vla_tests = [load(os.path.join(d, "vla_test.json")) for d in seed_dirs]
+    mpc_tests = [load(os.path.join(d, "wam_mpc_test.json")) for d in seed_dirs]   # Push-T: planning with the WAM
 
     summary = {"seeds": [os.path.basename(d) for d in seed_dirs]}
 
@@ -61,7 +62,7 @@ def main():
     summary["wam_steps"] = mean_std([t["mean_steps"] for t in wam_tests if t])
     summary["vla_steps"] = mean_std([t["mean_steps"] for t in vla_tests if t])
     # Push-T only: best coverage of the goal per episode, averaged
-    coverage = {"wam_coverage": wam_tests, "vla_coverage": vla_tests}
+    coverage = {"wam_coverage": wam_tests, "vla_coverage": vla_tests, "wam_mpc_coverage": mpc_tests}
     for key, tests in coverage.items():
         values = mean_std([t.get("mean_max_coverage") for t in tests if t])
         if values is not None:
@@ -95,6 +96,7 @@ def main():
         ("mean steps, VLA", "vla_steps", 1),
         ("mean max coverage, WAM", "wam_coverage", 3),
         ("mean max coverage, VLA", "vla_coverage", 3),
+        ("mean max coverage, WAM planning", "wam_mpc_coverage", 3),
         ("state nMSE k=1", "state_nmse_k1", 4), ("  copy baseline k=1", "state_copy_k1", 4),
         ("state nMSE k=5", "state_nmse_k5", 4), ("  copy baseline k=5", "state_copy_k5", 4),
         ("state nMSE k=15", "state_nmse_k15", 4), ("  copy baseline k=15", "state_copy_k15", 4),

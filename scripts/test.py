@@ -40,6 +40,8 @@ def parse_args():
         help="Meta-World: language instruction (pusht and toy have their own).",
     )
     parser.add_argument("--lookahead", type=int, default=5, help="Imagination steps shown in the video.")
+    parser.add_argument("--planner", type=str, default="policy", choices=["policy", "mpc"],
+                        help="policy: act with the action head; mpc: plan with the world model (scripts/plan.py, Push-T).")
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--save-video", action="store_true")
     parser.add_argument("--video-dir", type=str, default="videos")
@@ -114,6 +116,11 @@ def main():
         import imageio.v2 as imageio
         os.makedirs(args.video_dir, exist_ok=True)
 
+    planner = None
+    if args.planner == "mpc":
+        from scripts.plan import LatentPlanner
+        planner = LatentPlanner(model)
+
     successes, lengths, coverages = 0, [], []
 
     for ep in range(args.episodes):
@@ -123,6 +130,8 @@ def main():
 
         frames, success, step, best_coverage = [], 0, 0, 0.0
         done = False
+        if planner is not None:
+            planner.reset()
         while not done and step < max_steps:
             img_t = to_tensor(img, size, device)
             state_t = torch.from_numpy(np.asarray(state)).float().unsqueeze(0).to(device)
@@ -131,7 +140,8 @@ def main():
                 frames.append(mind_frame(model, img_t, text_ids, state_t, args.lookahead)
                               if model.is_wam else to_np_img(img_t[0]))
 
-            action = model.act(img_t, text_ids, state_t).squeeze(0).cpu().numpy()
+            act = model.act if planner is None else planner.act
+            action = act(img_t, text_ids, state_t).squeeze(0).cpu().numpy()
             img, state, reward, done, info = env.step(action)
             success = max(success, int(info.get("success", 0)))
             best_coverage = max(best_coverage, info.get("coverage", 0.0))
@@ -161,7 +171,7 @@ def main():
 
     if args.json_out:
         out = {"success_rate": successes / args.episodes, "episodes": args.episodes,
-               "mean_steps": float(np.mean(lengths)), "seed": args.seed}
+               "mean_steps": float(np.mean(lengths)), "seed": args.seed, "planner": args.planner}
         if has_coverage:
             # Push-T's usual score: the best coverage reached in each episode, averaged
             out["mean_max_coverage"] = float(np.mean(coverages))
