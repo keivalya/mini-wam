@@ -41,6 +41,7 @@ CLEARANCE = AGENT_RADIUS + GAP  # the agent's center stays this far from the T w
 SPACING = 12.0                  # pixels between candidate contact points
 ANGLES = (-0.4, 0.0, 0.4)       # push directions relative to the face normal (radians)
 MAX_PUSH = 20                   # steps per push
+LEAD = 40.0                     # pixels the target leads the agent when walking or pushing hard
 PATH_COST = 0.01                # pose error (pixels) worth one pixel of walking
 CONVEX = (0, 1, 2, 4, 5, 7)     # T_OUTLINE corners a path can go around
 
@@ -111,7 +112,7 @@ class PushTExpert:
         plan["pushing"] += 1
         if plan["pushing"] >= plan["steps"]:
             self.plan = None
-        return to_action(plan["speed"] * STEP * plan["direction"])
+        return to_action(plan["lead"] * plan["direction"])
 
     # ----------------------------------------------------------- choose push
 
@@ -122,7 +123,7 @@ class PushTExpert:
     def choose_push(self, phys):
         agent, pose = phys[:2], phys[4:7]
         error = pose_error(pose)
-        speed = float(np.clip(error / 30.0, 0.1, 0.8))   # gentler pushes near the goal
+        lead = LEAD * float(np.clip(error / 30.0, 0.1, 0.8))   # gentler pushes near the goal
         rot = rotation(pose[2])
 
         options = []
@@ -137,7 +138,7 @@ class PushTExpert:
                 sim = np.array([*start, 0.0, 0.0, *pose])
                 best_k, best_err = 0, error
                 for k in range(1, MAX_PUSH + 1):
-                    sim = physics_step(sim, to_action(speed * STEP * direction))
+                    sim = physics_step(sim, to_action(lead * direction))
                     err = pose_error(sim[4:7])
                     if err < best_err:
                         best_k, best_err = k, err
@@ -159,7 +160,7 @@ class PushTExpert:
             return None
         _, k, contact, normal, local = best
         return {"contact": contact, "normal": normal, "local_direction": local, "steps": k,
-                "speed": speed, "pose": pose.copy(), "pushing": 0}
+                "lead": lead, "pose": pose.copy(), "pushing": 0}
 
     # ------------------------------------------------------------------ walk
 
@@ -168,8 +169,8 @@ class PushTExpert:
         if start is not agent:
             return to_action(start - agent)  # touching the block: back away from it first
         path = self.path(agent, goal, pose) or [agent, goal]
-        # aim one STEP ahead along the path, so the agent doesn't stop at every corner
-        return to_action(point_along(path, STEP) - agent)
+        # aim LEAD pixels ahead along the path, so the agent doesn't stop at every corner
+        return to_action(point_along(path, LEAD) - agent)
 
     def path(self, start, goal, pose):
         """Shortest walk from start to goal that keeps CLEARANCE from the T, or None."""

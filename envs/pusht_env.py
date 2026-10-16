@@ -1,7 +1,9 @@
 """Push-T: push a T-shaped block onto a fixed target pose.
 
 The task from Diffusion Policy (Chi et al., RSS 2023), rebuilt with the same
-physics constants so it runs headless with numpy, pymunk and OpenCV:
+physics constants so it runs headless with numpy, pymunk and OpenCV, and so
+it replays the human demonstrations of LeRobot's Push-T dataset (see
+scripts/download_pusht.py):
 
     - a blue disk (the agent) moves in a 512 x 512 workspace, tracking a
       target point with a PD controller (k_p = 100, k_v = 20) at 100 Hz
@@ -14,12 +16,16 @@ Two changes make it a better fit for a small world model:
     1. An action moves the PD target relative to the agent: a in [-1, 1]^2
        puts the target up to STEP pixels away, instead of at an absolute
        position. A random action is then a local nudge, and "what if I
-       pushed left?" is a meaningful question.
+       pushed left?" is a meaningful question. Recorded absolute targets
+       convert exactly unless they are more than STEP pixels away on an
+       axis (29 of the 25,650 human demonstration frames).
     2. The block's velocity is reset at every control step (10 Hz). With the
        original zero damping it only carries over one 10 ms physics substep
        anyway, and resetting it makes the observed state a complete
        description of the world: simulate(state, actions) reproduces step()
        exactly, so every prediction can be checked against the simulator.
+       From a recorded state it predicts the human demonstrations' next
+       block pose to within 0.6 px in 99% of steps.
 
 State (8-dim), positions in the unit square with y pointing up (as in the image):
     [agent_x, agent_y, agent_vx, agent_vy, block_x, block_y, block_cos, block_sin]
@@ -43,7 +49,7 @@ WORKSPACE = 512.0
 AGENT_RADIUS = 15.0
 SIM_HZ, CONTROL_HZ = 100, 10
 KP, KV = 100.0, 20.0
-STEP = 40.0
+STEP = 100.0
 GOAL_POSE = (256.0, 256.0, np.pi / 4)  # x, y, angle
 SUCCESS_COVERAGE = 0.95
 
@@ -60,12 +66,15 @@ T_AREA = 120.0 * 30.0 + 30.0 * 90.0
 T_COG = (0.0, 45.0)                                   # mean of the two centroids, as in the original
 T_MOMENT = 2 * pymunk.moment_for_poly(1.0, T_PARTS[0])  # as in the original
 WALLS = (((5, 506), (5, 5)), ((5, 5), (506, 5)), ((506, 5), (506, 506)), ((5, 506), (506, 506)))
-TARGET_LIMITS = (5 + 2 + AGENT_RADIUS, 506 - 2 - AGENT_RADIUS)  # keep the agent inside the walls
+TARGET_LIMITS = (5 + 2 + AGENT_RADIUS, 506 - 2 - AGENT_RADIUS)  # where the agent fits inside the walls
 
+# colors as they appear in the LeRobot dataset's frames
 BACKGROUND = (255, 255, 255)
-GOAL_COLOR = (144, 238, 144)   # LightGreen
-BLOCK_COLOR = (119, 136, 153)  # LightSlateGray
-AGENT_COLOR = (65, 105, 225)   # RoyalBlue
+WALL_COLOR = (211, 211, 211)
+GOAL_COLOR = (144, 238, 144)
+BLOCK_COLOR = (144, 163, 182)
+AGENT_COLOR = (82, 124, 252)
+DATASET_SIZE = 96  # the dataset's frames: a 512 px canvas resized to 96 x 96
 
 
 # ------------------------------------------------------------------ geometry
@@ -150,7 +159,7 @@ def physics_step(phys, action):
     """One 10 Hz control step: move the PD target by `action`, run ten 100 Hz substeps."""
     ax, ay, vx, vy, bx, by, th = phys
     a = np.clip(np.asarray(action, dtype=np.float64), -1.0, 1.0)
-    tx, ty = np.clip([ax + STEP * a[0], ay - STEP * a[1]], *TARGET_LIMITS)
+    tx, ty = np.clip([ax + STEP * a[0], ay - STEP * a[1]], 0.0, WORKSPACE)  # the original's action range
 
     space = pymunk.Space()
     space.damping = 0.0  # no velocity memory: the block stops as soon as nothing pushes it
@@ -189,7 +198,7 @@ class PushTEnv:
     - step(action) -> (image, state, reward, done, info)
     """
 
-    instruction = "push the T onto the green target"
+    instruction = "Push the T-shaped block onto the T-shaped target."  # LeRobot's task string
 
     def __init__(self, seed=42, image_size=64):
         self.rng = np.random.default_rng(seed)
@@ -273,21 +282,23 @@ class PushTEnv:
     # rendering -------------------------------------------------------------
 
     def _render(self, state=None):
+        """Draw like the original: a 512 px canvas resized to 96 x 96, then to image_size."""
         import cv2
 
-        n = self.image_size
+        n = int(WORKSPACE)
         img = np.full((n, n, 3), BACKGROUND, dtype=np.uint8)
         phys = from_state(self.state if state is None else state)
 
-        shift = 4  # sub-pixel precision for anti-aliased drawing
-        scale = n / WORKSPACE * 2 ** shift
+        for a, b in WALLS:
+            cv2.line(img, a, b, WALL_COLOR, 4)
         for pose, color in ((GOAL_POSE, GOAL_COLOR), (phys[4:7], BLOCK_COLOR)):
             for part in T_PARTS:
-                pts = np.round(to_world(part, pose) * scale).astype(np.int32)
-                cv2.fillPoly(img, [pts], color, lineType=cv2.LINE_AA, shift=shift)
+                cv2.fillPoly(img, [np.round(to_world(part, pose)).astype(np.int32)], color)
+        cv2.circle(img, tuple(int(round(c)) for c in phys[:2]), int(AGENT_RADIUS), AGENT_COLOR, -1)
 
-        center = tuple(int(round(c * scale)) for c in phys[:2])
-        cv2.circle(img, center, int(round(AGENT_RADIUS * scale)), AGENT_COLOR, -1, cv2.LINE_AA, shift)
+        img = cv2.resize(img, (DATASET_SIZE, DATASET_SIZE))
+        if self.image_size != DATASET_SIZE:
+            img = cv2.resize(img, (self.image_size, self.image_size), interpolation=cv2.INTER_AREA)
         return img
 
     def render(self):

@@ -235,11 +235,12 @@ def plot_what_if(model, ep, labels, env_name, out_dir, horizon=15):
         return
 
     A = ep["actions"].shape[1]
+    sim, _, scale = make_simulator(env_name)
     angles = np.linspace(0, 2 * np.pi, 8, endpoint=False)
     plans = [np.zeros(A)]
     for a in angles:
         v = np.zeros(A)
-        v[0], v[1] = np.cos(a), np.sin(a)
+        v[0], v[1] = (scale or 1.0) * np.cos(a), (scale or 1.0) * np.sin(a)
         plans.append(v)
     names = ["no-op"] + [f"{int(np.degrees(a))}°" for a in angles]
 
@@ -256,7 +257,6 @@ def plot_what_if(model, ep, labels, env_name, out_dir, horizon=15):
     pred = out["state"].cpu().numpy()  # (n, H+1, S)
 
     truth = None
-    sim, _ = make_simulator(env_name)
     if sim is not None:
         s0 = ep["states"][0].cpu().numpy()
         truth = np.stack([np.concatenate([s0[None], sim.simulate(s0, acts[i].cpu().numpy())]) for i in range(n)])

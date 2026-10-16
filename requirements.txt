@@ -11,6 +11,9 @@ metaworld
 
 # data / image utils
 opencv-python
+huggingface_hub # downloads LeRobot's Push-T dataset
+pyarrow
+av # decodes its AV1 video
 
 # misc
 matplotlib

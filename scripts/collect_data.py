@@ -1,6 +1,7 @@
 """Collect WAM-compatible demonstration data from an expert policy.
 
-    --env pusht      Push-T: push a T-shaped block onto a target (pymunk, minutes on a laptop)
+    --env pusht      Push-T with a scripted expert (pymunk, minutes on a laptop); for
+                     LeRobot's human demonstrations use scripts/download_pusht.py
     --env toy        2D point-mass world from the paper (numpy only, seconds on a laptop)
     --env metaworld  Meta-World MT1 task with its scripted expert
 

@@ -12,6 +12,7 @@ set -euo pipefail
 # ======================= experiment configuration =======================
 # Each experiment in the study changes one of these lines (and nothing else).
 ENV_NAME="${ENV_NAME:-pusht}"            # pusht or toy
+PUSHT_DATA="${PUSHT_DATA:-lerobot}"      # pusht: lerobot (206 human demos) or expert (scripted, with random bursts)
 case "$ENV_NAME" in
   pusht) DEFAULT_EPISODES=200; DEFAULT_MAX_STEPS=300; DEFAULT_RANDOM_ACTION_PROB=0.1 ;;
   toy)   DEFAULT_EPISODES=400; DEFAULT_MAX_STEPS=80;  DEFAULT_RANDOM_ACTION_PROB=0.3 ;;
@@ -19,7 +20,7 @@ case "$ENV_NAME" in
 esac
 SEEDS="${SEEDS:-0 1 2}"
 EPOCHS="${EPOCHS:-15}"
-EPISODES="${EPISODES:-$DEFAULT_EPISODES}"     # demonstrations per seed (90% train / 10% held out)
+EPISODES="${EPISODES:-$DEFAULT_EPISODES}"     # collected demonstrations per seed (90% train / 10% held out)
 MAX_STEPS="${MAX_STEPS:-$DEFAULT_MAX_STEPS}"  # per collected and tested episode
 RANDOM_ACTION_PROB="${RANDOM_ACTION_PROB:-$DEFAULT_RANDOM_ACTION_PROB}"   # exploration bursts in the data
 HORIZON="${HORIZON:-5}"                  # imagination steps per training window
@@ -36,7 +37,7 @@ VIS_DIR="${VIS_DIR:-outputs/$ENV_NAME}"
 
 # ---- environment: one venv per package list, reused across runs
 #      (set PICO_WAM_PY=/path/to/python to use an existing environment instead)
-PKGS='torch numpy opencv-python-headless imageio imageio[ffmpeg] matplotlib pymunk'
+PKGS='torch numpy opencv-python-headless imageio imageio[ffmpeg] matplotlib pymunk huggingface_hub pyarrow av'
 PY="${PYTHON:-python3}"
 export PATH="$HOME/.local/bin:$PATH"     # batch jobs may not see a user-installed uv otherwise
 
@@ -85,7 +86,7 @@ export PYTHONUNBUFFERED=1
 
 echo "[run] host=$(hostname) python=$($PYV --version) torch=$($PYV -c 'import torch; print(torch.__version__, torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu")')"
 echo "[run] cpus: $(nproc) slurm_job=${SLURM_JOB_ID:-none}"
-echo "[run] config: ENV_NAME=$ENV_NAME SEEDS='$SEEDS' EPOCHS=$EPOCHS EPISODES=$EPISODES MAX_STEPS=$MAX_STEPS RANDOM_ACTION_PROB=$RANDOM_ACTION_PROB HORIZON=$HORIZON STATE_WEIGHT=$STATE_WEIGHT IMAGE_WEIGHT=$IMAGE_WEIGHT LATENT_WEIGHT=$LATENT_WEIGHT STATE_INPUT=$STATE_INPUT ACTION_HEAD=$ACTION_HEAD TEST_EPISODES=$TEST_EPISODES"
+echo "[run] config: ENV_NAME=$ENV_NAME PUSHT_DATA=$PUSHT_DATA SEEDS='$SEEDS' EPOCHS=$EPOCHS EPISODES=$EPISODES MAX_STEPS=$MAX_STEPS RANDOM_ACTION_PROB=$RANDOM_ACTION_PROB HORIZON=$HORIZON STATE_WEIGHT=$STATE_WEIGHT IMAGE_WEIGHT=$IMAGE_WEIGHT LATENT_WEIGHT=$LATENT_WEIGHT STATE_INPUT=$STATE_INPUT ACTION_HEAD=$ACTION_HEAD TEST_EPISODES=$TEST_EPISODES"
 
 STATE_FLAG=""
 [ "$STATE_INPUT" = "0" ] && STATE_FLAG="--no_state_input"
@@ -96,10 +97,15 @@ for SEED in $SEEDS; do
   mkdir -p "$R"
   echo "[run] ===== seed $SEED ====="
 
-  # 1. data (a different dataset per seed)
-  $PYV -m scripts.collect_data --env "$ENV_NAME" --episodes "$EPISODES" --max-steps "$MAX_STEPS" \
-    --seed $((42 + 1000 * SEED)) --random-action-prob "$RANDOM_ACTION_PROB" \
-    --output-path "$R/$ENV_NAME.npz" | tail -3
+  # 1. data: LeRobot's human demos (the same for every seed; the seed changes the
+  #    train/val split and the initialization), or a fresh collection per seed
+  if [ "$ENV_NAME" = "pusht" ] && [ "$PUSHT_DATA" = "lerobot" ]; then
+    $PYV -m scripts.download_pusht --output-path "$R/$ENV_NAME.npz" | tail -7
+  else
+    $PYV -m scripts.collect_data --env "$ENV_NAME" --episodes "$EPISODES" --max-steps "$MAX_STEPS" \
+      --seed $((42 + 1000 * SEED)) --random-action-prob "$RANDOM_ACTION_PROB" \
+      --output-path "$R/$ENV_NAME.npz" | tail -3
+  fi
 
   # 2. WAM and the VLA baseline (same data, same action head, same seed)
   $PYV -m scripts.train --dataset-path "$R/$ENV_NAME.npz" --model_type wam --action_head "$ACTION_HEAD" \

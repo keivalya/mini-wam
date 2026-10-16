@@ -195,17 +195,20 @@ def evaluate(model, data, episodes, max_horizon=15):
 
 def make_simulator(env_name):
     """
-    The true simulator of an env, and the state dimensions its actions move:
-        pusht: everything (agent position/velocity, block pose)
-        toy:   agent_x, agent_y, vel_x, vel_y (the goal never moves)
+    The true simulator of an env, the state dimensions its actions move, and
+    the size of the random actions to test it with:
+        pusht: everything (agent position/velocity, block pose); random
+               targets up to 40 px from the agent, about twice the human
+               demonstrations' typical 19 px
+        toy:   agent_x, agent_y, vel_x, vel_y (the goal never moves); any force
     """
     if env_name == "pusht":
-        from envs.pusht_env import PushTEnv
-        return PushTEnv(), list(range(8))
+        from envs.pusht_env import PushTEnv, STEP
+        return PushTEnv(), list(range(8)), 40.0 / STEP
     if env_name == "toy":
         from envs.toy_point_env import ToyPointEnv
-        return ToyPointEnv(), [0, 1, 2, 3]
-    return None, None
+        return ToyPointEnv(), [0, 1, 2, 3], 1.0
+    return None, None, None
 
 
 @torch.no_grad()
@@ -220,7 +223,7 @@ def evaluate_counterfactuals(model, data, episodes, env_name="toy", horizon=10, 
         noop  : true future under zero actions vs true future under the random
                 actions (what you'd score by ignoring the actions)
     """
-    sim, dims = make_simulator(env_name)
+    sim, dims, scale = make_simulator(env_name)
     rng = np.random.default_rng(seed)
     std = model.state_std.cpu().numpy()[dims]
     dev = model.state_mean.device
@@ -233,7 +236,7 @@ def evaluate_counterfactuals(model, data, episodes, env_name="toy", horizon=10, 
         ep = get_episode(data, e, device=dev)
         T = ep["actions"].shape[0]
         for t in range(0, T, every):
-            plans = rng.uniform(-1, 1, size=(n_plans, horizon, 2)).astype(np.float32)
+            plans = rng.uniform(-scale, scale, size=(n_plans, horizon, 2)).astype(np.float32)
             s0 = ep["states"][t].cpu().numpy()
 
             truth = np.stack([sim.simulate(s0, p) for p in plans])[..., dims]           # (P, H, S)
@@ -258,6 +261,7 @@ def evaluate_counterfactuals(model, data, episodes, env_name="toy", horizon=10, 
         "noop_nmse": (err_noop / count).tolist(),
         "n_starts": count,
         "n_plans": n_plans,
+        "action_scale": scale,
     }
 
 
