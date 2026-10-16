@@ -17,14 +17,14 @@ set -euo pipefail
 ENV_NAME="${ENV_NAME:-pusht}"            # pusht or toy
 PUSHT_DATA="${PUSHT_DATA:-lerobot}"      # pusht: lerobot (human demos), expert (scripted, with random bursts) or mixed (both)
 DEMOS="${DEMOS:-206}"                    # pusht: how many of LeRobot's 206 human demos to use (the first N)
-MODE="${MODE:-pipeline}"                 # pipeline, or supervision (the matched-supervision pilot)
+MODE="${MODE:-supervision}"                 # pipeline, or supervision (the matched-supervision pilot)
 PLAN="${PLAN:-1}"                        # pusht: also test the WAM planning with its world model (scripts/plan.py)
 case "$ENV_NAME" in
   pusht) DEFAULT_EPISODES=200; DEFAULT_MAX_STEPS=300; DEFAULT_RANDOM_ACTION_PROB=0.1 ;;
   toy)   DEFAULT_EPISODES=400; DEFAULT_MAX_STEPS=80;  DEFAULT_RANDOM_ACTION_PROB=0.3 ;;
   *) echo "[run] unknown ENV_NAME=$ENV_NAME (use pusht or toy)"; exit 1 ;;
 esac
-SEEDS="${SEEDS:-0 1 2}"
+SEEDS="${SEEDS:-0 1 2 3 4}"
 EPOCHS="${EPOCHS:-15}"
 EPISODES="${EPISODES:-$DEFAULT_EPISODES}"     # collected demonstrations per seed (90% train / 10% held out)
 MAX_STEPS="${MAX_STEPS:-$DEFAULT_MAX_STEPS}"  # per collected and tested episode
