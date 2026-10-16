@@ -16,7 +16,7 @@ set -euo pipefail
 # Each experiment in the study changes one of these lines (and nothing else).
 ENV_NAME="${ENV_NAME:-pusht}"            # pusht or toy
 PUSHT_DATA="${PUSHT_DATA:-lerobot}"      # pusht: lerobot (human demos), expert (scripted, with random bursts) or mixed (both)
-DEMOS="${DEMOS:-206}"                    # pusht: how many of LeRobot's 206 human demos to use (the first N)
+DEMOS="${DEMOS:-50}"                    # pusht: how many of LeRobot's 206 human demos to use (the first N)
 MODE="${MODE:-pipeline}"                 # pipeline, or supervision (the matched-supervision pilot)
 PLAN="${PLAN:-1}"                        # pusht: also test the WAM planning with its world model (scripts/plan.py)
 case "$ENV_NAME" in
