@@ -38,6 +38,7 @@ VIS_DIR="${VIS_DIR:-outputs/$ENV_NAME}"
 #      (set PICO_WAM_PY=/path/to/python to use an existing environment instead)
 PKGS='torch numpy opencv-python-headless imageio imageio[ffmpeg] matplotlib pymunk'
 PY="${PYTHON:-python3}"
+export PATH="$HOME/.local/bin:$PATH"     # batch jobs may not see a user-installed uv otherwise
 
 if command -v module >/dev/null 2>&1 && [ -n "${PICO_WAM_MODULES:-}" ]; then
   module load $PICO_WAM_MODULES
