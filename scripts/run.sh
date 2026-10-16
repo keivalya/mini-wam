@@ -20,6 +20,7 @@ DEMOS="${DEMOS:-206}"                    # pusht: how many of LeRobot's 206 huma
 MODE="${MODE:-pipeline}"                 # pipeline, or supervision (the matched-supervision pilot)
 PLAN="${PLAN:-1}"                        # pusht: also test the WAM planning with its world model (scripts/plan.py)
 PLAN_SWEEP="${PLAN_SWEEP:-1}"            # pusht: also test other planner budgets (more search, no policy prior)
+PARALLEL_SEEDS="${PARALLEL_SEEDS:-1}"    # 1 = run all seeds at once on the job's GPU (same results, less wall time)
 case "$ENV_NAME" in
   pusht) DEFAULT_EPISODES=200; DEFAULT_MAX_STEPS=300; DEFAULT_RANDOM_ACTION_PROB=0.1 ;;
   toy)   DEFAULT_EPISODES=400; DEFAULT_MAX_STEPS=80;  DEFAULT_RANDOM_ACTION_PROB=0.3 ;;
@@ -122,23 +123,45 @@ get_data() {  # get_data <dir> <seed>
   fi
 }
 
+# for_each_seed <function>: run "<function> <seed>" for every seed, one after
+# another, or with PARALLEL_SEEDS=1 all at once, each logging to its own file;
+# the logs are printed in seed order once every seed has finished
+for_each_seed() {
+  if [ "$PARALLEL_SEEDS" = "1" ]; then
+    local SEED pid status=0 pids=()
+    for SEED in $SEEDS; do
+      OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 "$1" "$SEED" > "$OUT/log-seed$SEED.txt" 2>&1 &
+      pids+=($!)
+    done
+    for pid in "${pids[@]}"; do wait "$pid" || status=1; done
+    for SEED in $SEEDS; do cat "$OUT/log-seed$SEED.txt"; done
+    return $status
+  fi
+  local SEED
+  for SEED in $SEEDS; do "$1" "$SEED"; done
+}
+
 rm -rf "$OUT"
+mkdir -p "$OUT"
 
 if [ "$MODE" = "supervision" ]; then
-  for SEED in $SEEDS; do
+  pilot_seed() {
+    local SEED="$1"
     R="$OUT/seed-$SEED"
     mkdir -p "$R"
     echo "[run] ===== supervision pilot, seed $SEED ====="
     get_data "$R" "$SEED"
     $PYV -m scripts.supervision_ablation --dataset "$R/$ENV_NAME.npz" --seed "$SEED" --epochs "$EPOCHS" \
       --device "$TORCH_DEVICE" --output "$R/ablation" | grep -E "RESULT"
-  done
+  }
+  for_each_seed pilot_seed
   $PYV -m scripts.summarize_supervision --root "$OUT" --seeds "$(echo $SEEDS | wc -w)"
   echo "[run] done"
   exit 0
 fi
 
-for SEED in $SEEDS; do
+run_seed() {
+  local SEED="$1"
   R="$OUT/seed$SEED"
   mkdir -p "$R"
   echo "[run] ===== seed $SEED ====="
@@ -174,7 +197,8 @@ for SEED in $SEEDS; do
         --json-out "$R/wam_mpc_${NAME}_test.json" | tail -1 | sed "s/^/[$NAME] /"
     done
   fi
-done
+}
+for_each_seed run_seed
 
 # ---- 5. look inside the world model (first seed)
 FIRST_SEED="${SEEDS%% *}"
