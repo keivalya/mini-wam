@@ -6,18 +6,18 @@ Questions this answers (all on episodes the model never trained on):
 2. Can it imagine the future?                      state / image error vs imagination step k
 3. Is imagination better than "nothing changes"?   compared against a copy-current baseline
 4. Which physical quantities live in the latent?   R^2 per state variable
-5. Does it understand *actions*?                   toy env only: imagine the
-   future under random action sequences the expert never took, and compare
-   against the true simulator ("counterfactual error"). A model that ignores
-   actions scores like the "no-op" baseline, which predicts the future the
-   agent would have had without acting.
+5. Does it understand *actions*?                   pusht and toy envs: imagine
+   the future under random action sequences the expert never took, and
+   compare against the true simulator ("counterfactual error"). A model that
+   ignores actions scores like the "no-op" baseline, which predicts the
+   future the agent would have had without acting.
 
 The imagination here is open-loop: encode o_t once, then roll the latent
 dynamics forward with the actions that were really taken, never looking at
 o_t+1 ... o_t+k.
 
 Usage:
-    python -m scripts.evaluate --checkpoint checkpoints/wam.pt --dataset-path data/toy.npz
+    python -m scripts.evaluate --checkpoint checkpoints/wam.pt --dataset-path data/pusht.npz
 """
 
 import argparse
@@ -193,23 +193,35 @@ def evaluate(model, data, episodes, max_horizon=15):
     return results
 
 
-@torch.no_grad()
-def evaluate_counterfactuals(model, data, episodes, horizon=10, n_plans=8, every=5, seed=0):
+def make_simulator(env_name):
     """
-    Toy env only. For starts every `every` steps of each held-out episode, draw
-    `n_plans` random action sequences, imagine with each, and compare the
-    imagined agent position/velocity with the true simulator.
+    The true simulator of an env, and the state dimensions its actions move:
+        pusht: everything (agent position/velocity, block pose)
+        toy:   agent_x, agent_y, vel_x, vel_y (the goal never moves)
+    """
+    if env_name == "pusht":
+        from envs.pusht_env import PushTEnv
+        return PushTEnv(), list(range(8))
+    if env_name == "toy":
+        from envs.toy_point_env import ToyPointEnv
+        return ToyPointEnv(), [0, 1, 2, 3]
+    return None, None
+
+
+@torch.no_grad()
+def evaluate_counterfactuals(model, data, episodes, env_name="toy", horizon=10, n_plans=8, every=5, seed=0):
+    """
+    For starts every `every` steps of each held-out episode, draw `n_plans`
+    random action sequences, imagine with each, and compare the imagined
+    state with the true simulator.
 
     returns per-k normalized MSE of:
         wam   : imagined vs true future under the random actions
         noop  : true future under zero actions vs true future under the random
                 actions (what you'd score by ignoring the actions)
     """
-    from envs.toy_point_env import ToyPointEnv
-
-    sim = ToyPointEnv()
+    sim, dims = make_simulator(env_name)
     rng = np.random.default_rng(seed)
-    dims = [0, 1, 2, 3]  # agent_x, agent_y, vel_x, vel_y
     std = model.state_std.cpu().numpy()[dims]
     dev = model.state_mean.device
 
@@ -224,8 +236,8 @@ def evaluate_counterfactuals(model, data, episodes, horizon=10, n_plans=8, every
             plans = rng.uniform(-1, 1, size=(n_plans, horizon, 2)).astype(np.float32)
             s0 = ep["states"][t].cpu().numpy()
 
-            truth = np.stack([sim.simulate(s0, p) for p in plans])[..., dims]           # (P, H, 4)
-            noop = sim.simulate(s0, np.zeros((horizon, 2), np.float32))[None, :, dims]  # (1, H, 4)
+            truth = np.stack([sim.simulate(s0, p) for p in plans])[..., dims]           # (P, H, S)
+            noop = sim.simulate(s0, np.zeros((horizon, 2), np.float32))[None, :, dims]  # (1, H, S)
 
             out = model.imagine(
                 ep["images"][t : t + 1].expand(n_plans, -1, -1, -1),
@@ -234,7 +246,7 @@ def evaluate_counterfactuals(model, data, episodes, horizon=10, n_plans=8, every
                 horizon,
                 torch.from_numpy(plans).to(dev),
             )
-            pred = out["state"][:, 1:].cpu().numpy()[..., dims]                          # (P, H, 4)
+            pred = out["state"][:, 1:].cpu().numpy()[..., dims]                          # (P, H, S)
 
             err_wam += (((pred - truth) / std) ** 2).mean(axis=(0, 2))
             err_noop += (((noop - truth) / std) ** 2).mean(axis=(0, 2))
@@ -280,8 +292,8 @@ def main():
             row = [results["state_r2"][k][j] for k in sorted(set(show))]
             print(f"{name:>14} " + " ".join(f"{'—':>7}" if r is None else f"{r:>7.3f}" for r in row))
 
-    if ckpt.get("env") == "toy" and model.predict_state:
-        cf = evaluate_counterfactuals(model, data, episodes)
+    if ckpt.get("env") in ("pusht", "toy") and model.predict_state:
+        cf = evaluate_counterfactuals(model, data, episodes, env_name=ckpt["env"])
         results["counterfactual"] = cf
         print(f"\nCounterfactual imagination ({cf['n_starts']} starts x {cf['n_plans']} random plans)")
         print(f"{'k':>3} {'WAM nMSE':>9} {'no-op':>8}")

@@ -60,6 +60,12 @@ def main():
     summary["vla_success"] = mean_std([t["success_rate"] for t in vla_tests if t])
     summary["wam_steps"] = mean_std([t["mean_steps"] for t in wam_tests if t])
     summary["vla_steps"] = mean_std([t["mean_steps"] for t in vla_tests if t])
+    # Push-T only: best coverage of the goal per episode, averaged
+    coverage = {"wam_coverage": wam_tests, "vla_coverage": vla_tests}
+    for key, tests in coverage.items():
+        values = mean_std([t.get("mean_max_coverage") for t in tests if t])
+        if values is not None:
+            summary[key] = values
 
     for k in [1, 5, 10, 15]:
         summary[f"state_nmse_k{k}"] = mean_std([at(e["state_nmse"], k) for e in evals if e and e["state_nmse"]])
@@ -87,6 +93,8 @@ def main():
         ("closed-loop success, VLA", "vla_success", 3),
         ("mean steps, WAM", "wam_steps", 1),
         ("mean steps, VLA", "vla_steps", 1),
+        ("mean max coverage, WAM", "wam_coverage", 3),
+        ("mean max coverage, VLA", "vla_coverage", 3),
         ("state nMSE k=1", "state_nmse_k1", 4), ("  copy baseline k=1", "state_copy_k1", 4),
         ("state nMSE k=5", "state_nmse_k5", 4), ("  copy baseline k=5", "state_copy_k5", 4),
         ("state nMSE k=15", "state_nmse_k15", 4), ("  copy baseline k=15", "state_copy_k15", 4),
@@ -100,6 +108,8 @@ def main():
         ("readout R2 (mean) k=15", "readout_r2_k15", 3),
     ]
     for name, key, digits in rows:
+        if key.endswith("_coverage") and key not in summary:
+            continue
         print(f"  {name:<28} {fmt(summary.get(key), digits)}")
 
     output = args.output or os.path.join(args.root, "summary.json")

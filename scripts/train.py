@@ -41,7 +41,7 @@ class TrainingDataset:
     """
     The whole dataset lives in memory (on the GPU if there is one).
 
-    The toy dataset is ~15k transitions of 64x64 images (~400 MB as uint8),
+    A Push-T dataset is ~40k transitions of 64x64 images (~1 GB as uint8),
     so instead of a DataLoader we keep every array as a tensor on the device
     and build each batch with plain tensor indexing. That avoids a per-sample
     DataLoader, which is the bottleneck on a cluster node with one CPU core.
@@ -146,8 +146,8 @@ def parse_args():
     parser.add_argument(
         "--env",
         type=str,
-        default="toy",
-        choices=["toy", "metaworld", "mujoco"],
+        default="pusht",
+        choices=["pusht", "toy", "metaworld", "mujoco"],
     )
 
     parser.add_argument(

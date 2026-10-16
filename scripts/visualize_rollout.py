@@ -12,12 +12,13 @@ Writes a set of figures for one held-out episode (and the whole held-out set):
                         encode which physical quantities
     4_what_if.png       counterfactual imagination: same start, different
                         actions -> where does the WAM think the agent goes?
-                        (toy env: checked against the true simulator)
+                        (pusht and toy envs: checked against the true simulator)
     5_horizon.png       how imagination error grows with the number of
                         imagined steps, against a "nothing changes" baseline
     6_keypoints.png     what the spatial-softmax encoder is tracking
                         (only with --image_encoder keypoints)
     dream.mp4           real vs. imagined video (--video)
+    dream.gif           the same video as a GIF, as in the README (--gif)
 
 Usage:
     python -m scripts.visualize_rollout --checkpoint checkpoints/wam.pt
@@ -38,6 +39,7 @@ from scripts.evaluate import (
     get_episode,
     encode_episode,
     evaluate,
+    make_simulator,
     resolve_device,
 )
 
@@ -70,6 +72,7 @@ def parse_args():
     parser.add_argument("--eval-horizon", type=int, default=15)
     parser.add_argument("--out-dir", type=str, default=None, help="Default: outputs/<checkpoint name>")
     parser.add_argument("--video", action="store_true")
+    parser.add_argument("--gif", action="store_true", help="Also save the dream video as a GIF.")
     parser.add_argument("--device", type=str, default="cpu")
     return parser.parse_args()
 
@@ -253,9 +256,8 @@ def plot_what_if(model, ep, labels, env_name, out_dir, horizon=15):
     pred = out["state"].cpu().numpy()  # (n, H+1, S)
 
     truth = None
-    if env_name == "toy":
-        from envs.toy_point_env import ToyPointEnv
-        sim = ToyPointEnv()
+    sim, _ = make_simulator(env_name)
+    if sim is not None:
         s0 = ep["states"][0].cpu().numpy()
         truth = np.stack([np.concatenate([s0[None], sim.simulate(s0, acts[i].cpu().numpy())]) for i in range(n)])
 
@@ -264,7 +266,8 @@ def plot_what_if(model, ep, labels, env_name, out_dir, horizon=15):
     fig, axes = plt.subplots(1, 2 if has_img else 1, figsize=(10 if has_img else 5, 4.6), squeeze=False)
     ax = axes[0, 0]
 
-    if env_name == "toy":
+    if env_name in ("pusht", "toy"):
+        # both envs report positions in the unit square with y up, like the image
         ax.imshow(to_np_img(ep["images"][0]), extent=[0, 1, 0, 1], alpha=0.35)
         ax.set_xlim(0, 1); ax.set_ylim(0, 1)
 
@@ -364,7 +367,7 @@ def plot_keypoints(model, ep, n_frames, out_dir):
 
 
 @torch.no_grad()
-def save_dream_video(model, ep, imag, dream, out_dir):
+def save_dream_video(model, ep, imag, dream, out_dir, gif=False):
     if "image" not in imag:
         return
     import imageio.v2 as imageio
@@ -374,16 +377,23 @@ def save_dream_video(model, ep, imag, dream, out_dir):
         img = cv2.resize(img, (192, 192), interpolation=cv2.INTER_NEAREST)
         return cv2.putText(img.copy(), text, (4, 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 1)
 
+    frames = [
+        np.concatenate([
+            label(to_np_img(ep["images"][t]), f"real t={t}"),
+            label(to_np_img(imag["image"][0, t]), "imagined (real actions)"),
+            label(to_np_img(dream["image"][0, t]), "dreamed (own policy)"),
+        ], axis=1)
+        for t in range(imag["image"].shape[1])
+    ]
     path = os.path.join(out_dir, "dream.mp4")
-    H = imag["image"].shape[1]
     with imageio.get_writer(path, fps=8) as w:
-        for t in range(H):
-            w.append_data(np.concatenate([
-                label(to_np_img(ep["images"][t]), f"real t={t}"),
-                label(to_np_img(imag["image"][0, t]), "imagined (real actions)"),
-                label(to_np_img(dream["image"][0, t]), "dreamed (own policy)"),
-            ], axis=1))
+        for f in frames:
+            w.append_data(f)
     print("Saved:", path)
+    if gif:
+        path = os.path.join(out_dir, "dream.gif")
+        imageio.mimsave(path, frames, duration=1000 / 8, loop=0)
+        print("Saved:", path)
 
 
 def main():
@@ -412,8 +422,8 @@ def main():
     results["episodes"] = episodes
     plot_horizon(results, labels, out_dir)
     plot_keypoints(model, ep, args.frames, out_dir)
-    if args.video:
-        save_dream_video(model, ep, imag, dream, out_dir)
+    if args.video or args.gif:
+        save_dream_video(model, ep, imag, dream, out_dir, gif=args.gif)
 
 
 if __name__ == "__main__":

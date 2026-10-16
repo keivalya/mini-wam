@@ -4,6 +4,7 @@ numpy
 datasets
 
 # simulation
+pymunk # Push-T physics
 gymnasium
 mujoco # or mujoco==3.x
 metaworld

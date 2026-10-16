@@ -1,6 +1,7 @@
 """Collect WAM-compatible demonstration data from an expert policy.
 
-    --env toy        2D point-mass world (numpy only, seconds on a laptop)
+    --env pusht      Push-T: push a T-shaped block onto a target (pymunk, minutes on a laptop)
+    --env toy        2D point-mass world from the paper (numpy only, seconds on a laptop)
     --env metaworld  Meta-World MT1 task with its scripted expert
 
 VLA data:
@@ -43,10 +44,20 @@ import numpy as np
 from utils.tokenizer import SimpleTokenizer
 
 
+# per-env defaults for flags left unset. Push-T needs precise final pushes, so
+# it gets fewer random bursts: at 0.3 they undo the expert's placement and
+# most episodes never finish.
+ENV_DEFAULTS = {
+    "pusht": {"max_steps": 300, "random_action_prob": 0.1, "expert_noise": 0.05},
+    "toy": {"max_steps": 150, "random_action_prob": 0.3, "expert_noise": 0.1},
+    "metaworld": {"max_steps": 150, "random_action_prob": 0.3, "expert_noise": 0.0},
+}
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--env", type=str, default="toy", choices=["toy", "metaworld"])
+    parser.add_argument("--env", type=str, default="pusht", choices=["pusht", "toy", "metaworld"])
     parser.add_argument("--env-name", type=str, default="push-v3", help="Meta-World task")
 
     parser.add_argument(
@@ -61,7 +72,7 @@ def parse_args():
 
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--episodes", type=int, default=50)
-    parser.add_argument("--max-steps", type=int, default=150)
+    parser.add_argument("--max-steps", type=int, default=None, help="Default: 300 for pusht, 150 otherwise.")
 
     parser.add_argument(
         "--image-size",
@@ -87,7 +98,7 @@ def parse_args():
         "--instruction",
         type=str,
         default="push the object to the goal",
-        help="Fixed instruction for all Meta-World episodes (toy env picks its own).",
+        help="Fixed instruction for all Meta-World episodes (pusht and toy have their own).",
     )
 
     parser.add_argument(
@@ -99,8 +110,9 @@ def parse_args():
     parser.add_argument(
         "--random-action-prob",
         type=float,
-        default=0.3,
-        help="Probability of starting a burst of random (non-expert) actions at each step.",
+        default=None,
+        help="Probability of starting a burst of random (non-expert) actions at each step. "
+        "Default: 0.1 for pusht, 0.3 otherwise.",
     )
 
     parser.add_argument(
@@ -113,11 +125,15 @@ def parse_args():
     parser.add_argument(
         "--expert-noise",
         type=float,
-        default=0.1,
-        help="Toy env only: std of Gaussian noise added to expert actions.",
+        default=None,
+        help="pusht and toy: std of Gaussian noise added to expert actions. Default: 0.05 for pusht, 0.1 for toy.",
     )
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    for name, value in ENV_DEFAULTS[args.env].items():
+        if getattr(args, name) is None:
+            setattr(args, name, value)
+    return args
 
 
 def resize(img, size):
@@ -148,7 +164,13 @@ class ExpertEnv:
     def __init__(self, args):
         self.args = args
 
-        if args.env == "toy":
+        if args.env == "pusht":
+            from envs.pusht_env import PushTEnv, STATE_LABELS
+
+            self.env = PushTEnv(seed=args.seed, image_size=args.image_size)
+            self.state_labels = STATE_LABELS
+
+        elif args.env == "toy":
             from envs.toy_point_env import ToyPointEnv, STATE_LABELS
 
             self.env = ToyPointEnv(seed=args.seed, image_size=args.image_size)
@@ -170,17 +192,17 @@ class ExpertEnv:
     def reset(self, ep):
         img, state, info = self.env.reset(seed=self.args.seed + ep)
         self.state = state
-        if self.args.env == "toy":
+        if self.args.env in ("pusht", "toy"):
             return img, state, info["instruction"]
         return img, state, self.args.instruction
 
     def random_action(self, rng):
-        if self.args.env == "toy":
+        if self.args.env in ("pusht", "toy"):
             return rng.uniform(-1.0, 1.0, size=self.env.action_dim).astype(np.float32)
         return self.env.env.action_space.sample().astype(np.float32)
 
     def expert(self):
-        if self.args.env == "toy":
+        if self.args.env in ("pusht", "toy"):
             return self.env.expert_action(noise=self.args.expert_noise)
         return np.asarray(self.policy.get_action(self.state), dtype=np.float32)
 
@@ -255,7 +277,7 @@ def main():
             image_t, state_t = image_tp1, state_tp1
             steps += 1
 
-            # (the toy env already reports done=True on success)
+            # (pusht and toy already report done=True on success)
             if args.stop_on_success and success == 1:
                 done = True
 

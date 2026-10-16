@@ -1,4 +1,4 @@
-"""Test a pico-WAM (or VLA baseline) policy in closed loop (toy env or Meta-World MT1).
+"""Test a pico-WAM (or VLA baseline) policy in closed loop (Push-T, toy env or Meta-World MT1).
 
 With --save-video, every frame of a WAM rollout shows what the model sees
 and what it is thinking:
@@ -26,18 +26,18 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Test a pico-WAM policy in closed loop")
 
     parser.add_argument("--checkpoint", type=str, default="checkpoints/model.pt")
-    parser.add_argument("--env", type=str, default=None, choices=["toy", "metaworld"],
+    parser.add_argument("--env", type=str, default=None, choices=["pusht", "toy", "metaworld"],
                         help="Defaults to the env the checkpoint was trained on.")
     parser.add_argument("--env-name", type=str, default="push-v3", help="Meta-World task")
     parser.add_argument("--camera-name", type=str, default="topview")
     parser.add_argument("--seed", type=int, default=10_000, help="Use seeds not seen in training.")
     parser.add_argument("--episodes", type=int, default=20)
-    parser.add_argument("--max-steps", type=int, default=80)
+    parser.add_argument("--max-steps", type=int, default=None, help="Default: 300 for pusht, 80 otherwise.")
     parser.add_argument(
         "--instruction",
         type=str,
         default=None,
-        help="Meta-World: language instruction (toy env picks one per episode).",
+        help="Meta-World: language instruction (pusht and toy have their own).",
     )
     parser.add_argument("--lookahead", type=int, default=5, help="Imagination steps shown in the video.")
     parser.add_argument("--device", type=str, default="cpu")
@@ -49,6 +49,10 @@ def parse_args():
 
 
 def make_env(args, env_name, image_size):
+    if env_name == "pusht":
+        from envs.pusht_env import PushTEnv
+        return PushTEnv(seed=args.seed, image_size=image_size)
+
     if env_name == "toy":
         from envs.toy_point_env import ToyPointEnv
         return ToyPointEnv(seed=args.seed, image_size=image_size)
@@ -102,6 +106,7 @@ def main():
 
     env_name = args.env or ckpt.get("env", "toy")
     env = make_env(args, env_name, size)
+    max_steps = args.max_steps or (300 if env_name == "pusht" else 80)
     print(f"[test] env={env_name} state_dim={env.state_dim} action_dim={env.action_dim} "
           f"model_type={model.config['model_type']}")
 
@@ -109,16 +114,16 @@ def main():
         import imageio.v2 as imageio
         os.makedirs(args.video_dir, exist_ok=True)
 
-    successes, lengths = 0, []
+    successes, lengths, coverages = 0, [], []
 
     for ep in range(args.episodes):
         img, state, info = env.reset(seed=args.seed + ep)
         instruction = info.get("instruction") or args.instruction or "push the object to the goal"
         text_ids = torch.tensor([tokenizer.encode(instruction)], dtype=torch.long, device=device)
 
-        frames, success, step = [], 0, 0
+        frames, success, step, best_coverage = [], 0, 0, 0.0
         done = False
-        while not done and step < args.max_steps:
+        while not done and step < max_steps:
             img_t = to_tensor(img, size, device)
             state_t = torch.from_numpy(np.asarray(state)).float().unsqueeze(0).to(device)
 
@@ -129,6 +134,7 @@ def main():
             action = model.act(img_t, text_ids, state_t).squeeze(0).cpu().numpy()
             img, state, reward, done, info = env.step(action)
             success = max(success, int(info.get("success", 0)))
+            best_coverage = max(best_coverage, info.get("coverage", 0.0))
             step += 1
 
             # Meta-World doesn't stop on success by itself
@@ -136,7 +142,9 @@ def main():
 
         successes += success
         lengths.append(step)
-        print(f"[test] Episode {ep + 1}/{args.episodes}: \"{instruction}\" success={success} steps={step}")
+        coverages.append(best_coverage)
+        extra = f" max_coverage={best_coverage:.3f}" if "coverage" in info else ""
+        print(f"[test] Episode {ep + 1}/{args.episodes}: \"{instruction}\" success={success} steps={step}{extra}")
 
         if args.save_video:
             path = os.path.join(args.video_dir, f"{env_name}_ep{ep + 1:03d}.mp4")
@@ -146,13 +154,19 @@ def main():
             print(f"[test] Saved video to {path}")
 
     env.close()
+    has_coverage = "coverage" in info
     print(f"[test] Success rate: {successes}/{args.episodes} = {successes / args.episodes:.0%} "
-          f"| mean steps: {np.mean(lengths):.1f}")
+          f"| mean steps: {np.mean(lengths):.1f}"
+          + (f" | mean max coverage: {np.mean(coverages):.3f}" if has_coverage else ""))
 
     if args.json_out:
+        out = {"success_rate": successes / args.episodes, "episodes": args.episodes,
+               "mean_steps": float(np.mean(lengths)), "seed": args.seed}
+        if has_coverage:
+            # Push-T's usual score: the best coverage reached in each episode, averaged
+            out["mean_max_coverage"] = float(np.mean(coverages))
         with open(args.json_out, "w") as f:
-            json.dump({"success_rate": successes / args.episodes, "episodes": args.episodes,
-                       "mean_steps": float(np.mean(lengths)), "seed": args.seed}, f, indent=2)
+            json.dump(out, f, indent=2)
 
 
 if __name__ == "__main__":
