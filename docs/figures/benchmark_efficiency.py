@@ -94,7 +94,7 @@ def main():
     params["wam_total"], params["vla_total"] = n_params(wam), n_params(vla)
 
     data_path = [os.path.join(args.run_dir, f) for f in sorted(os.listdir(args.run_dir)) if f.endswith(".npz")][0]
-    ds = TrainingDataset(data_path, horizon=5)
+    ds = TrainingDataset(data_path, horizon=5, action_chunk=wam.config.get("action_chunk", 1))
     ds.to(torch.device("cpu"))
     i0 = int(ds.starts[0])
     img = ds.t_images[i0 : i0 + 1].float() / 255.0

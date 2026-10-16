@@ -47,7 +47,7 @@ class TrainingDataset:
     DataLoader, which is the bottleneck on a cluster node with one CPU core.
     """
 
-    def __init__(self, path: str, horizon: int = 1, resize_to: int = 64):
+    def __init__(self, path: str, horizon: int = 1, resize_to: int = 64, action_chunk: int = 1):
         data = np.load(path, allow_pickle=True)
 
         self.images = self._resize(data["images"], resize_to)   # (N, H, W, 3) uint8
@@ -77,6 +77,11 @@ class TrainingDataset:
         self.env = str(data["env"]) if "env" in data else "unknown"
 
         self.horizon = horizon
+        self.action_chunk = action_chunk
+        # last transition of each transition's episode: action chunks that run past
+        # the end of an episode repeat its last action
+        is_last = np.append(self.episode_ids[1:] != self.episode_ids[:-1], True)
+        self.episode_last = np.flip(np.minimum.accumulate(np.flip(np.where(is_last, np.arange(n), n)))).copy()
 
         # a window starting at i is valid if i ... i+H-1 are all in the same episode
         last = np.arange(n) + horizon - 1
@@ -104,6 +109,7 @@ class TrainingDataset:
         self.t_actions = t(self.actions).float()
         self.t_text_ids = t(self.text_ids).long()
         self.t_is_expert = t(self.is_expert).float()
+        self.t_episode_last = t(self.episode_last).long()
         if self.next_states is not None:
             self.t_next_states = t(self.next_states).float()
         if self.next_images is not None:
@@ -129,6 +135,11 @@ class TrainingDataset:
                 "text_ids": self.t_text_ids[i],
                 "actions": self.t_actions[window],
             }
+            if self.action_chunk > 1:
+                k = torch.arange(self.action_chunk, device=self.device)
+                chunk = torch.minimum(i[:, None] + k, self.t_episode_last[i][:, None])     # (B, K)
+                batch["action_chunk"] = self.t_actions[chunk]
+                batch["chunk_expert"] = self.t_is_expert[chunk].min(dim=1).values
             # o_t+k is next_*[t+k-1], so the H future observations are next_*[t : t+H]
             if self.next_states is not None:
                 batch["future_states"] = self.t_next_states[window]
@@ -212,6 +223,8 @@ def parse_args():
     parser.add_argument("--d-model", type=int, default=128)
     parser.add_argument("--diffusion-T", type=int, default=16)
     parser.add_argument("--flow-steps", type=int, default=8)
+    parser.add_argument("--action-chunk", type=int, default=1,
+                        help="Predict the next K actions at once (Diffusion Policy-style action chunking).")
 
     # Loss weights.
     parser.add_argument("--action-weight", type=float, default=1.0)
@@ -352,7 +365,7 @@ def main():
 
     horizon = args.horizon if args.model_type == "wam" else 1
 
-    full = TrainingDataset(args.dataset_path, horizon=horizon, resize_to=args.resize_to)
+    full = TrainingDataset(args.dataset_path, horizon=horizon, resize_to=args.resize_to, action_chunk=args.action_chunk)
     validate_args_and_dataset(args, full)
 
     train_eps, val_eps = split_episodes(full.episode_ids, args.val_frac, args.seed)
@@ -383,6 +396,7 @@ def main():
         use_state_input=not args.no_state_input,
         diffusion_T=args.diffusion_T,
         flow_steps=args.flow_steps,
+        action_chunk=args.action_chunk,
     ).to(device)
 
     train_states = full.states[np.isin(full.episode_ids, train_eps)]

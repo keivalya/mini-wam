@@ -40,6 +40,8 @@ def parse_args():
         help="Meta-World: language instruction (pusht and toy have their own).",
     )
     parser.add_argument("--lookahead", type=int, default=5, help="Imagination steps shown in the video.")
+    parser.add_argument("--execute-steps", type=int, default=None,
+                        help="With action chunks of K actions: how many to execute before predicting again (default K // 2).")
     parser.add_argument("--planner", type=str, default="policy", choices=["policy", "mpc"],
                         help="policy: act with the action head; mpc: plan with the world model (scripts/plan.py, Push-T).")
     parser.add_argument("--device", type=str, default="cpu")
@@ -132,6 +134,7 @@ def main():
         done = False
         if planner is not None:
             planner.reset()
+        queue = []   # actions of the current chunk still to execute
         while not done and step < max_steps:
             img_t = to_tensor(img, size, device)
             state_t = torch.from_numpy(np.asarray(state)).float().unsqueeze(0).to(device)
@@ -140,8 +143,14 @@ def main():
                 frames.append(mind_frame(model, img_t, text_ids, state_t, args.lookahead)
                               if model.is_wam else to_np_img(img_t[0]))
 
-            act = model.act if planner is None else planner.act
-            action = act(img_t, text_ids, state_t).squeeze(0).cpu().numpy()
+            if planner is None and model.config.get("action_chunk", 1) > 1:
+                if not queue:
+                    k = args.execute_steps or max(1, model.config["action_chunk"] // 2)
+                    queue = list(model.act_chunk(img_t, text_ids, state_t)[0, :k].cpu().numpy())
+                action = queue.pop(0)
+            else:
+                act = model.act if planner is None else planner.act
+                action = act(img_t, text_ids, state_t).squeeze(0).cpu().numpy()
             img, state, reward, done, info = env.step(action)
             success = max(success, int(info.get("success", 0)))
             best_coverage = max(best_coverage, info.get("coverage", 0.0))
