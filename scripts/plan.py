@@ -35,12 +35,12 @@ from envs.pusht_env import AGENT_RADIUS, GOAL_POSE, T_COG, T_OUTLINE, WORKSPACE
 
 class LatentPlanner:
     def __init__(self, model, horizon=12, samples=256, elites=32, iterations=1, noise=0.1,
-                 approach_weight=0.05, seed=0):
+                 approach_weight=0.05, prior="policy", seed=0):
         if not (model.is_wam and model.predict_state):
             raise ValueError("Planning needs a WAM that predicts states (its dynamics and state readout).")
         self.model = model
         self.horizon, self.samples, self.elites, self.iterations = horizon, samples, elites, iterations
-        self.noise, self.approach_weight = noise, approach_weight
+        self.noise, self.approach_weight, self.prior = noise, approach_weight, prior
         self.generator = torch.Generator(device=model.state_mean.device).manual_seed(seed)
 
         dev = model.state_mean.device
@@ -90,8 +90,11 @@ class LatentPlanner:
         model, H, N = self.model, self.horizon, self.samples
         z0 = model.encode_obs(image, text_ids, state)                                   # (1, D)
 
-        # the policy's own plan, imagined: a_k = pi(z_k)
-        prior = model.imagine(image, text_ids, state, H)["actions"][0]                  # (H, 2)
+        # the policy's own plan, imagined: a_k = pi(z_k); or, without a policy, standing still
+        if self.prior == "policy":
+            prior = model.imagine(image, text_ids, state, H)["actions"][0]              # (H, 2)
+        else:
+            prior = torch.zeros((H, model.config["action_dim"]), device=z0.device)
         mean = prior.clone()
         if self.previous is not None:  # warm start from the last plan, shifted by one step
             mean = torch.cat([self.previous[1:], prior[-1:]], 0)
@@ -111,4 +114,26 @@ class LatentPlanner:
             mean, std = elite.mean(0), elite.std(0).clamp_min(0.05)
 
         self.previous = best_seq
+        self.last = {"z0": z0, "plan": best_seq, "cost": best_cost}
         return best_seq[:1]                                                              # (1, 2), like model.act
+
+    @torch.no_grad()
+    def check_last_plan(self, sim, state):
+        """
+        Compare the last chosen plan's imagined outcome with the simulator's, from
+        the same state: block-pose error between them, and the improvement in
+        block-pose error (both in pixels) that the model expected vs the real one.
+        """
+        from envs.pusht_env import from_state
+        from envs.pusht_expert import pose_error
+
+        plan = self.last["plan"]
+        z = self.model.dynamics.rollout(self.last["z0"], plan[None])
+        predicted = self.model.denormalize_state(self.model.state_readout(z))[0, -1].cpu().numpy()
+        true = sim.simulate(state, plan.cpu().numpy())[-1]
+        now = pose_error(from_state(state)[4:7])
+        return {
+            "plan_error_px": pose_error(from_state(predicted)[4:7], from_state(true)[4:7]),
+            "expected_gain_px": now - pose_error(from_state(predicted)[4:7]),
+            "real_gain_px": now - pose_error(from_state(true)[4:7]),
+        }

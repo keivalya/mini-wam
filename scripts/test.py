@@ -42,6 +42,10 @@ def parse_args():
     parser.add_argument("--lookahead", type=int, default=5, help="Imagination steps shown in the video.")
     parser.add_argument("--planner", type=str, default="policy", choices=["policy", "mpc"],
                         help="policy: act with the action head; mpc: plan with the world model (scripts/plan.py, Push-T).")
+    parser.add_argument("--planner-config", type=str, default="{}",
+                        help='JSON overrides for the planner, e.g. \'{"iterations": 3, "noise": 0.3}\'.')
+    parser.add_argument("--check-plans-every", type=int, default=10,
+                        help="mpc on Push-T: every N steps, compare the chosen plan's imagined outcome with the simulator's (0 = never).")
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--save-video", action="store_true")
     parser.add_argument("--video-dir", type=str, default="videos")
@@ -116,10 +120,11 @@ def main():
         import imageio.v2 as imageio
         os.makedirs(args.video_dir, exist_ok=True)
 
-    planner = None
+    planner, plan_checks = None, []
     if args.planner == "mpc":
         from scripts.plan import LatentPlanner
-        planner = LatentPlanner(model)
+        planner = LatentPlanner(model, **json.loads(args.planner_config))
+        sim = make_env(args, env_name, size)
 
     successes, lengths, coverages = 0, [], []
 
@@ -142,6 +147,8 @@ def main():
 
             act = model.act if planner is None else planner.act
             action = act(img_t, text_ids, state_t).squeeze(0).cpu().numpy()
+            if planner is not None and args.check_plans_every and env_name == "pusht" and step % args.check_plans_every == 0:
+                plan_checks.append(planner.check_last_plan(sim, np.asarray(state)))
             img, state, reward, done, info = env.step(action)
             success = max(success, int(info.get("success", 0)))
             best_coverage = max(best_coverage, info.get("coverage", 0.0))
@@ -175,6 +182,13 @@ def main():
         if has_coverage:
             # Push-T's usual score: the best coverage reached in each episode, averaged
             out["mean_max_coverage"] = float(np.mean(coverages))
+            out["max_coverage"] = [float(c) for c in coverages]
+        if planner is not None:
+            out["planner_config"] = {k: getattr(planner, k) for k in
+                                     ["horizon", "samples", "elites", "iterations", "noise", "approach_weight", "prior"]}
+            if plan_checks:
+                out["plan_checks"] = {k: float(np.mean([c[k] for c in plan_checks])) for k in plan_checks[0]}
+                out["plan_checks"]["n"] = len(plan_checks)
         with open(args.json_out, "w") as f:
             json.dump(out, f, indent=2)
 
