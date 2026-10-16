@@ -15,7 +15,7 @@ set -euo pipefail
 # ======================= experiment configuration =======================
 # Each experiment in the study changes one of these lines (and nothing else).
 ENV_NAME="${ENV_NAME:-pusht}"            # pusht or toy
-PUSHT_DATA="${PUSHT_DATA:-lerobot}"      # pusht: lerobot (human demos), expert (scripted, with random bursts) or mixed (both)
+PUSHT_DATA="${PUSHT_DATA:-expert}"      # pusht: lerobot (human demos), expert (scripted, with random bursts) or mixed (both)
 DEMOS="${DEMOS:-206}"                    # pusht: how many of LeRobot's 206 human demos to use (the first N)
 MODE="${MODE:-pipeline}"                 # pipeline, or supervision (the matched-supervision pilot)
 PLAN="${PLAN:-1}"                        # pusht: also test the WAM planning with its world model (scripts/plan.py)
@@ -28,7 +28,7 @@ SEEDS="${SEEDS:-0 1 2}"
 EPOCHS="${EPOCHS:-15}"
 EPISODES="${EPISODES:-$DEFAULT_EPISODES}"     # collected demonstrations per seed (90% train / 10% held out)
 MAX_STEPS="${MAX_STEPS:-$DEFAULT_MAX_STEPS}"  # per collected and tested episode
-RANDOM_ACTION_PROB="${RANDOM_ACTION_PROB:-$DEFAULT_RANDOM_ACTION_PROB}"   # exploration bursts in the data
+RANDOM_ACTION_PROB="${RANDOM_ACTION_PROB:-0.3}"   # exploration bursts in the data
 HORIZON="${HORIZON:-5}"                  # imagination steps per training window
 STATE_WEIGHT="${STATE_WEIGHT:-0.5}"
 IMAGE_WEIGHT="${IMAGE_WEIGHT:-1.0}"
