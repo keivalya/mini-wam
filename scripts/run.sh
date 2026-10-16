@@ -33,7 +33,7 @@ HORIZON="${HORIZON:-5}"                  # imagination steps per training window
 STATE_WEIGHT="${STATE_WEIGHT:-0.5}"
 IMAGE_WEIGHT="${IMAGE_WEIGHT:-1.0}"
 LATENT_WEIGHT="${LATENT_WEIGHT:-1.0}"
-STATE_INPUT="${STATE_INPUT:-1}"          # 0 = image + language only (no state_t input)
+STATE_INPUT="${STATE_INPUT:-0}"          # 0 = image + language only (no state_t input)
 ACTION_HEAD="${ACTION_HEAD:-mlp}"
 TEST_EPISODES="${TEST_EPISODES:-100}"
 DEVICE="${DEVICE:-auto}"
