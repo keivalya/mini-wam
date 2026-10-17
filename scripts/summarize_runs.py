@@ -3,7 +3,7 @@
 Reads, for every seed directory under --root (e.g. results/seed0, results/seed1, ...):
     wam_eval.json   from scripts/evaluate.py
     wam_test.json   from scripts/test.py (WAM)
-    vla_test.json   from scripts/test.py (VLA baseline, optional)
+    vla_test.json   from scripts/test.py (mini-VLA baseline, optional)
 
 and prints mean ± std across seeds of the headline numbers.
 
@@ -104,11 +104,11 @@ def main():
     print(f"Summary over {len(seed_dirs)} seeds ({', '.join(summary['seeds'])})")
     rows = [
         ("closed-loop success, WAM", "wam_success", 3),
-        ("closed-loop success, VLA", "vla_success", 3),
+        ("closed-loop success, mini-VLA", "vla_success", 3),
         ("mean steps, WAM", "wam_steps", 1),
-        ("mean steps, VLA", "vla_steps", 1),
+        ("mean steps, mini-VLA", "vla_steps", 1),
         ("mean max coverage, WAM", "wam_coverage", 3),
-        ("mean max coverage, VLA", "vla_coverage", 3),
+        ("mean max coverage, mini-VLA", "vla_coverage", 3),
         ("mean max coverage, WAM planning", "wam_mpc_coverage", 3),
         ("  planning, warm start", "wam_mpc_warm_coverage", 3),
         ("  plans: expected gain px", "mpc_expected_gain_px", 1), ("  plans: real gain px", "mpc_real_gain_px", 1),

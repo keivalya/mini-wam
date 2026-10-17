@@ -35,7 +35,7 @@ W = fs.TEXT  # 5.5 in, the paper's \textwidth
 
 # one colour per role, used identically in every figure
 WAM = fs.PALETTE["red"]        # pico-WAM
-VLA = fs.PALETTE["blue"]       # VLA baseline
+VLA = fs.PALETTE["blue"]       # the mini-VLA baseline
 FACT = fs.PALETTE["green"]     # factual imagination (real actions)
 DREAM = fs.PALETTE["purple"]   # dreamed (own policy)
 TRUE = "#000000"               # ground truth
@@ -174,7 +174,7 @@ def fig_exploration(exps):
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.3), ncol=1)
 
     ax = axes[1]
-    for off, key, color, label in [(-0.012, "wam_test", WAM, "pico-WAM"), (0.012, "vla_test", VLA, "VLA baseline")]:
+    for off, key, color, label in [(-0.012, "wam_test", WAM, "pico-WAM"), (0.012, "vla_test", VLA, "mini-VLA")]:
         vals = np.stack([per_seed(exps[n], lambda s, key=key: 100 * s[key]["success_rate"]) for _, n in settings])
         ax.errorbar(xs + off, vals.mean(1), yerr=vals.std(1), color=color, marker="o", ms=3.5, capsize=2, lw=1.1, label=label)
     ax.set_xticks(xs)
@@ -392,7 +392,7 @@ def fig_data_and_state(exps):
 
     ax = axes[0]
     xs = np.array([n for n, _ in pts])
-    for off, key, color, label in [(0.96, "wam_test", WAM, "pico-WAM"), (1.04, "vla_test", VLA, "VLA baseline")]:
+    for off, key, color, label in [(0.96, "wam_test", WAM, "pico-WAM"), (1.04, "vla_test", VLA, "mini-VLA")]:
         vals = [per_seed(exps[name], lambda s, key=key: 100 * s[key]["success_rate"]) for _, name in pts]
         ax.errorbar(xs * off, [v.mean() for v in vals], yerr=[v.std() for v in vals], color=color, marker="o", ms=3.5,
                     capsize=2, lw=1.1, label=label)
@@ -411,7 +411,7 @@ def fig_data_and_state(exps):
     ax = axes[1]
     groups = [("baseline", "state + image"), ("image-only", "image only")]
     xpos = np.arange(len(groups))
-    for off, key, color, label in [(-0.18, "wam_test", WAM, "pico-WAM"), (0.18, "vla_test", VLA, "VLA baseline")]:
+    for off, key, color, label in [(-0.18, "wam_test", WAM, "pico-WAM"), (0.18, "vla_test", VLA, "mini-VLA")]:
         vals = [per_seed(exps[g], lambda s, key=key: 100 * s[key]["success_rate"]) for g, _ in groups]
         ax.bar(xpos + off, [v.mean() for v in vals], 0.34, color=color, label=label)
         for xp, v in zip(xpos, vals):
@@ -438,7 +438,7 @@ def fig_policy(exps):
     ax = axes[0]
     pts = [(25, "episodes-25"), (50, "episodes-50"), (100, "episodes-100"), (400, "baseline")]
     xs = np.array([n for n, _ in pts])
-    for off, key, color, label in [(0.95, "wam_test", WAM, "pico-WAM"), (1.05, "vla_test", VLA, "VLA baseline")]:
+    for off, key, color, label in [(0.95, "wam_test", WAM, "pico-WAM"), (1.05, "vla_test", VLA, "mini-VLA")]:
         vals = [per_seed(exps[name], lambda s, key=key: 100 * s[key]["success_rate"]) for _, name in pts]
         ax.errorbar(xs * off, [v.mean() for v in vals], yerr=[v.std() for v in vals], color=color, marker="o",
                     ms=3, capsize=2, lw=1.1, label=label)
@@ -457,7 +457,7 @@ def fig_policy(exps):
     ax = axes[1]
     groups = [("baseline", "state +\nimage"), ("image-only", "image\nonly")]
     xpos = np.arange(len(groups))
-    for off, key, color, label in [(-0.18, "wam_test", WAM, "pico-WAM"), (0.18, "vla_test", VLA, "VLA")]:
+    for off, key, color, label in [(-0.18, "wam_test", WAM, "pico-WAM"), (0.18, "vla_test", VLA, "mini-VLA")]:
         vals = [per_seed(exps[g], lambda s, key=key: 100 * s[key]["success_rate"]) for g, _ in groups]
         ax.bar(xpos + off, [v.mean() for v in vals], 0.34, color=color, label=label)
         for xp, v in zip(xpos, vals):
@@ -503,7 +503,7 @@ def fig_efficiency():
               ("action head", ["policy_head"], VLA),
               ("dynamics + readout", ["dynamics", "state_readout"], WAM),
               ("image decoder", ["image_decoder"], fs.PALETTE["orange"])]
-    models = [("VLA", P["vla"]), ("WAM,\nstates only", {k: v for k, v in P["wam"].items() if k != "image_decoder"}), ("WAM", P["wam"])]
+    models = [("mini-VLA", P["vla"]), ("WAM,\nstates only", {k: v for k, v in P["wam"].items() if k != "image_decoder"}), ("WAM", P["wam"])]
     y = np.arange(len(models))[::-1]
     for yi, (name, parts) in zip(y, models):
         left = 0.0
@@ -521,7 +521,7 @@ def fig_efficiency():
     # (b) one optimizer step
     ax = axes[1]
     T = d["train_step_ms"]
-    names = [("VLA", "vla", VLA), ("WAM,\nstates", "wam_state_only", WAM), ("WAM", "wam", fs.PALETTE["orange"])]
+    names = [("mini-VLA", "vla", VLA), ("WAM,\nstates", "wam_state_only", WAM), ("WAM", "wam", fs.PALETTE["orange"])]
     ax.bar(range(3), [T[k] for _, k, _ in names], color=[c for _, _, c in names], width=0.6)
     ax.set_yscale("log")
     ax.set_xticks(range(3))

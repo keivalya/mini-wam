@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end pico-WAM experiment, repeated over several seeds:
-#   for each seed: data -> train WAM -> train VLA baseline -> evaluate -> closed-loop test
+#   for each seed: data -> train WAM -> train mini-VLA baseline -> evaluate -> closed-loop test
 #                  (Push-T: also the WAM planning with its world model)
 #   then: visualize the first seed, Push-T extras (linear-model baseline, figure
 #   data, compute costs), and summarize mean ± std over seeds
@@ -173,7 +173,7 @@ run_seed() {
   get_data "$R" "$SEED"
 
   # the world model also learns from simulator branches of the demos ("what if
-  # the human had pushed differently?"); the VLA has no world model, so it keeps
+  # the human had pushed differently?"); mini-VLA has no world model, so it keeps
   # training on the demos alone
   WAM_DATA="$R/$ENV_NAME.npz"
   if [ "$ENV_NAME" = "pusht" ] && [ "$BRANCHES" = "1" ]; then
@@ -181,7 +181,7 @@ run_seed() {
     WAM_DATA="$R/branched.npz"
   fi
 
-  # 2. WAM and the VLA baseline (same demos, same action head, same seed)
+  # 2. WAM and the mini-VLA baseline (same demos, same action head, same seed)
   $PYV -m scripts.train --dataset-path "$WAM_DATA" --model_type wam --action_head "$ACTION_HEAD" --action-chunk "$ACTION_CHUNK" \
     --predict_state $IMAGE_FLAG $STATE_FLAG --horizon "$HORIZON" \
     --state-weight "$STATE_WEIGHT" --image-weight "$IMAGE_WEIGHT" --latent-weight "$LATENT_WEIGHT" \

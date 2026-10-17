@@ -1,4 +1,4 @@
-"""Test a pico-WAM (or VLA baseline) policy in closed loop (Push-T, toy env or Meta-World MT1).
+"""Test a pico-WAM (or mini-VLA baseline) policy in closed loop (Push-T, toy env or Meta-World MT1).
 
 With --save-video, every frame of a WAM rollout shows what the model sees
 and what it is thinking:

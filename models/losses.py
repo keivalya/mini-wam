@@ -1,4 +1,4 @@
-"""Training losses for pico-WAM (and its VLA baseline).
+"""Training losses for pico-WAM (and its mini-VLA baseline).
 
 VLA:
     L = w_a * L_action

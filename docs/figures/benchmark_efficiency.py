@@ -8,7 +8,7 @@ docs/results/efficiency/):
     latency      ms per call (batch 1) for act(), one latent dynamics step,
                  the linear state readout, the image decoder, and imagine(k)
     train_step   ms per optimizer step (batch 64) for WAM (H=5), the same WAM
-                 without its image decoder, and the VLA
+                 without its image decoder, and the mini-VLA baseline
     batching     ms to assemble one training batch with a per-sample
                  DataLoader-style loop vs. tensor indexing (the change made
                  in scripts/train.py)

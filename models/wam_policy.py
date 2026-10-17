@@ -24,8 +24,9 @@ The policy, the readouts and the dynamics all live on the same latent z,
 so the WAM can "dream": roll the policy forward entirely in latent space
 and decode what it expects to see (see `imagine`).
 
-model_type="vla" switches the world model off, leaving a plain VLA with the
-same encoders: the baseline every WAM experiment should be compared against.
+model_type="vla" switches the world model off, leaving mini-VLA
+(https://github.com/keivalya/mini-vla) with the same encoders and action head:
+the baseline every WAM experiment should be compared against.
 
 Supported action heads:
     mlp

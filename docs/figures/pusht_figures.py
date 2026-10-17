@@ -230,7 +230,7 @@ def fig_data(exps):
     ax = axes[1]
     for i, (name, _) in enumerate(present):
         s = exps[name]
-        dots(ax, i, coverage(s, "vla_test"), VLA, off=-0.18, label="VLA" if i == 0 else None)
+        dots(ax, i, coverage(s, "vla_test"), VLA, off=-0.18, label="mini-VLA" if i == 0 else None)
         dots(ax, i, coverage(s, "wam_test"), WAM, off=0.0, label="pico-WAM, reactive" if i == 0 else None)
         if all("wam_mpc_test" in r for r in s):
             dots(ax, i, coverage(s, "wam_mpc_test"), PLAN, marker="D", off=0.18, label="pico-WAM, planning" if i == 0 else None)
@@ -258,7 +258,7 @@ def fig_planning(budget, base):
     ax = axes[0]
     vla = coverage(budget, "vla_test")
     ax.axhspan(vla.mean() - vla.std(), vla.mean() + vla.std(), color=VLA, alpha=0.12, lw=0)
-    ax.axhline(vla.mean(), color=VLA, lw=0.8, ls="--", label="VLA, mean ± SD")
+    ax.axhline(vla.mean(), color=VLA, lw=0.8, ls="--", label="mini-VLA, mean ± SD")
     for i, (key, _) in enumerate(PLANNERS):
         dots(ax, i, coverage(budget, key), WAM if key == "wam_test" else PLAN, marker="o" if key == "wam_test" else "D")
     ax.set_xticks(x)
@@ -337,7 +337,7 @@ def fig_ablations(exps):
     axes[0].set_ylabel("training variant")
     axes[2].set_xlim(0, 100)
     axes[2].legend([Line2D([], [], color=VLA, marker="s", ls="none", ms=3), Line2D([], [], color=WAM, marker="o", ls="none", ms=3),
-                    Line2D([], [], color=PLAN, marker="D", ls="none", ms=3)], ["VLA", "WAM, reactive", "WAM, planning"],
+                    Line2D([], [], color=PLAN, marker="D", ls="none", ms=3)], ["mini-VLA", "WAM, reactive", "WAM, planning"],
                    loc="upper center", bbox_to_anchor=(0.5, -0.17), ncol=3, fontsize=5.5)
     fs.panel_labels(axes)
     finish(fig, "fig-pusht-ablations")
@@ -351,7 +351,7 @@ RECIPE = [("baseline", "study base,\none action per step"), ("action-chunks", "a
           ("chunks-restart-planner", "chunks, restarting planner"),
           ("branched-restart-planner", "chunks, branched data,\nrestarting planner"),
           ("final", "all three, 100 epochs")]
-POLICIES = [("vla_test", VLA, "s", 0.22, "VLA"), ("wam_test", WAM, "o", 0.0, "WAM, reactive"),
+POLICIES = [("vla_test", VLA, "s", 0.22, "mini-VLA"), ("wam_test", WAM, "o", 0.0, "WAM, reactive"),
             ("wam_mpc_test", PLAN, "D", -0.22, "WAM, planning")]
 
 
@@ -591,7 +591,7 @@ def fig_efficiency():
     groups = [("encoders + fusion", ["img_encoder", "txt_encoder", "state_encoder", "fusion"], "#BBBBBB"),
               ("action head", ["policy_head"], VLA), ("dynamics + readout", ["dynamics", "state_readout"], WAM),
               ("image decoder", ["image_decoder"], fs.PALETTE["orange"])]
-    models = [("VLA", P["vla"]), ("WAM,\nstates only", {k: v for k, v in P["wam"].items() if k != "image_decoder"}), ("WAM", P["wam"])]
+    models = [("mini-VLA", P["vla"]), ("WAM,\nstates only", {k: v for k, v in P["wam"].items() if k != "image_decoder"}), ("WAM", P["wam"])]
     y = np.arange(len(models))[::-1]
     for yi, (name, parts) in zip(y, models):
         left = 0.0
@@ -608,7 +608,7 @@ def fig_efficiency():
 
     ax = axes[1]
     T = d["train_step_ms"]
-    names = [("VLA", "vla", VLA), ("WAM,\nstates", "wam_state_only", WAM), ("WAM", "wam", fs.PALETTE["orange"])]
+    names = [("mini-VLA", "vla", VLA), ("WAM,\nstates", "wam_state_only", WAM), ("WAM", "wam", fs.PALETTE["orange"])]
     ax.bar(range(3), [T[k] for _, k, _ in names], color=[c for _, _, c in names], width=0.6)
     ax.set_yscale("log")
     ax.set_xticks(range(3))
