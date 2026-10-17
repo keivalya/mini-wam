@@ -11,16 +11,16 @@ Files in a seed folder:
 |---|---|
 | `wam_history.json`, `vla_history.json` | training and validation losses per epoch |
 | `wam_eval.json` | open-loop prediction errors of the world model, factual and counterfactual |
-| `vla_test.json`, `wam_test.json` | closed-loop test of the VLA and of the WAM's action head |
+| `vla_test.json`, `wam_test.json` | closed-loop test of the mini-VLA baseline and of the WAM's action head |
 | `wam_mpc_test.json` | closed-loop test of the WAM planning with its world model |
 | `wam_mpc_warm_test.json` | the same, with the older planner whose search starts from the last plan |
 | `wam_mpc_*_test.json` | the planner-budget variants: `wide`, `cem` and `noprior` |
 
 `data_checks.json` checks the converted LeRobot data against the simulator
-(`scripts/pusht_data_checks.py`). `baseline/` also holds the linear-model audit
+(`scripts/pusht_data_checks.py`). `baseline/` and `final/` also hold the linear-model audit
 (`dynamics_audit.json`), the data behind the qualitative figures (`figure-data/`), and
-the compute costs on a GPU node (`efficiency/`) and on one thread of a laptop CPU
-(`efficiency-laptop/`).
+the compute costs on a GPU node (`efficiency/`); `baseline/` also has them on one thread
+of a laptop CPU (`efficiency-laptop/`).
 
 ## Where each folder comes from
 
@@ -56,6 +56,7 @@ Each experiment is a git branch that changes one setting of its parent in
 | `chunks-branched` | world model also learns from simulator branches of the demos | `action-chunks` | `orx/push-t-chunks-simulator-branched-data` | 40c756f | ef4c299c |
 | `chunks-restart-planner` | each plan search restarts from the policy's plan | `action-chunks` | `orx/push-t-chunks-planner-restarts-from-the-policy` | 580cf45 | e944bedd |
 | `branched-restart-planner` | branched data and the restarting planner | `chunks-branched` | `orx/push-t-branched-data-planner-restarts-from-the-p` | 4946f33 | a9587dbf |
+| `final` | 100 epochs: the final configuration, and the defaults of `scripts/run.sh` | `branched-restart-planner` | `orx/push-t-branched-data-planner-restarts-100-epochs` | 0aa97c2 | 0378c41c |
 
 The `planner-budget` job hit its 6-hour limit after all three seeds had been tested,
 while computing the extras, so it has no `summary.json`; its numbers are read from the

@@ -129,6 +129,12 @@ def main():
         put("PTimagineTenMs", d["latency_ms"]["imagine_10_states"], "{:.2f}")
         put("PTimagineTenImgMs", d["latency_ms"]["imagine_10_states_and_images"], "{:.1f}")
 
+    eff = os.path.join(RESULTS, "final", "efficiency", "efficiency.json")
+    if os.path.exists(eff):   # the final model predicts chunks of 8 actions, so its action head is slightly larger
+        d = json.load(open(eff))
+        put("PTfinalParamsWam", d["parameters"]["wam_total"], "{:,d}")
+        put("PTfinalParamsVla", d["parameters"]["vla_total"], "{:,d}")
+
     laptop = os.path.join(RESULTS, "baseline", "efficiency-laptop", "efficiency.json")
     if os.path.exists(laptop):   # one thread of an Apple-silicon laptop CPU, like the point-mass benchmark
         d = json.load(open(laptop))
