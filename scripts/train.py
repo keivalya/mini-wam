@@ -67,6 +67,9 @@ class TrainingDataset:
             if horizon > 1:
                 raise ValueError("--horizon > 1 needs 'episode_ids' in the dataset.")
             self.episode_ids = np.zeros(n, dtype=np.int64)
+        # simulator branches (scripts/branch_demos.py) go to the same side of the
+        # train/val split as the demo they branch from
+        self.split_ids = data["source_episodes"] if "source_episodes" in data else self.episode_ids
 
         self.vocab = data["vocab"].item() if data["vocab"].shape == () else data["vocab"]
         self.state_labels = (
@@ -97,8 +100,8 @@ class TrainingDataset:
         return np.stack([cv2.resize(img, (size, size), interpolation=cv2.INTER_AREA) for img in images])
 
     def starts_in(self, episodes):
-        """Window start indices whose episode is in `episodes`."""
-        return self.starts[np.isin(self.episode_ids[self.starts], episodes)]
+        """Window start indices whose episode (or source demo) is in `episodes`."""
+        return self.starts[np.isin(self.split_ids[self.starts], episodes)]
 
     def to(self, device):
         """Move every array to `device` once, as tensors."""
@@ -368,7 +371,7 @@ def main():
     full = TrainingDataset(args.dataset_path, horizon=horizon, resize_to=args.resize_to, action_chunk=args.action_chunk)
     validate_args_and_dataset(args, full)
 
-    train_eps, val_eps = split_episodes(full.episode_ids, args.val_frac, args.seed)
+    train_eps, val_eps = split_episodes(full.split_ids, args.val_frac, args.seed)
     train_starts = full.starts_in(train_eps)
     val_starts = full.starts_in(val_eps)
     print(
@@ -399,10 +402,10 @@ def main():
         action_chunk=args.action_chunk,
     ).to(device)
 
-    train_states = full.states[np.isin(full.episode_ids, train_eps)]
+    train_states = full.states[np.isin(full.split_ids, train_eps)]
     model.set_state_stats(train_states.mean(axis=0), train_states.std(axis=0))
 
-    train_idx = np.nonzero(np.isin(full.episode_ids, train_eps))[0]
+    train_idx = np.nonzero(np.isin(full.split_ids, train_eps))[0]
     sample = train_idx[:: max(1, len(train_idx) // 2000)]
     model.set_image_mean(full.t_images[torch.as_tensor(sample, device=device)].float().mean(dim=0) / 255.0)
 

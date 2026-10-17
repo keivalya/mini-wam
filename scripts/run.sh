@@ -19,6 +19,7 @@ PUSHT_DATA="${PUSHT_DATA:-lerobot}"      # pusht: lerobot (human demos), expert 
 DEMOS="${DEMOS:-206}"                    # pusht: how many of LeRobot's 206 human demos to use (the first N)
 MODE="${MODE:-pipeline}"                 # pipeline, or supervision (the matched-supervision pilot)
 PLAN="${PLAN:-1}"                        # pusht: also test the WAM planning with its world model (scripts/plan.py)
+BRANCHES="${BRANCHES:-1}"                # pusht: 1 = the WAM also learns from simulator branches of the demos (scripts/branch_demos.py)
 PARALLEL_SEEDS="${PARALLEL_SEEDS:-1}"    # 1 = run all seeds at once on the job's GPU (same results, less wall time)
 case "$ENV_NAME" in
   pusht) DEFAULT_EPISODES=200; DEFAULT_MAX_STEPS=300; DEFAULT_RANDOM_ACTION_PROB=0.1 ;;
@@ -94,7 +95,7 @@ export PYTHONUNBUFFERED=1
 
 echo "[run] host=$(hostname) python=$($PYV --version) torch=$($PYV -c 'import torch; print(torch.__version__, torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu")')"
 echo "[run] cpus: $(nproc) slurm_job=${SLURM_JOB_ID:-none}"
-echo "[run] config: ENV_NAME=$ENV_NAME PUSHT_DATA=$PUSHT_DATA DEMOS=$DEMOS MODE=$MODE PLAN=$PLAN SEEDS='$SEEDS' EPOCHS=$EPOCHS EPISODES=$EPISODES MAX_STEPS=$MAX_STEPS RANDOM_ACTION_PROB=$RANDOM_ACTION_PROB HORIZON=$HORIZON ACTION_CHUNK=$ACTION_CHUNK STATE_WEIGHT=$STATE_WEIGHT IMAGE_WEIGHT=$IMAGE_WEIGHT LATENT_WEIGHT=$LATENT_WEIGHT STATE_INPUT=$STATE_INPUT ACTION_HEAD=$ACTION_HEAD TEST_EPISODES=$TEST_EPISODES"
+echo "[run] config: ENV_NAME=$ENV_NAME PUSHT_DATA=$PUSHT_DATA DEMOS=$DEMOS MODE=$MODE PLAN=$PLAN BRANCHES=$BRANCHES SEEDS='$SEEDS' EPOCHS=$EPOCHS EPISODES=$EPISODES MAX_STEPS=$MAX_STEPS RANDOM_ACTION_PROB=$RANDOM_ACTION_PROB HORIZON=$HORIZON ACTION_CHUNK=$ACTION_CHUNK STATE_WEIGHT=$STATE_WEIGHT IMAGE_WEIGHT=$IMAGE_WEIGHT LATENT_WEIGHT=$LATENT_WEIGHT STATE_INPUT=$STATE_INPUT ACTION_HEAD=$ACTION_HEAD TEST_EPISODES=$TEST_EPISODES"
 
 STATE_FLAG=""
 [ "$STATE_INPUT" = "0" ] && STATE_FLAG="--no_state_input"
@@ -167,8 +168,17 @@ run_seed() {
   echo "[run] ===== seed $SEED ====="
   get_data "$R" "$SEED"
 
-  # 2. WAM and the VLA baseline (same data, same action head, same seed)
-  $PYV -m scripts.train --dataset-path "$R/$ENV_NAME.npz" --model_type wam --action_head "$ACTION_HEAD" --action-chunk "$ACTION_CHUNK" \
+  # the world model also learns from simulator branches of the demos ("what if
+  # the human had pushed differently?"); the VLA has no world model, so it keeps
+  # training on the demos alone
+  WAM_DATA="$R/$ENV_NAME.npz"
+  if [ "$ENV_NAME" = "pusht" ] && [ "$BRANCHES" = "1" ]; then
+    $PYV -m scripts.branch_demos "$R/$ENV_NAME.npz" --seed "$SEED" --output-path "$R/branched.npz" | tail -1
+    WAM_DATA="$R/branched.npz"
+  fi
+
+  # 2. WAM and the VLA baseline (same demos, same action head, same seed)
+  $PYV -m scripts.train --dataset-path "$WAM_DATA" --model_type wam --action_head "$ACTION_HEAD" --action-chunk "$ACTION_CHUNK" \
     --predict_state --predict_image $STATE_FLAG --horizon "$HORIZON" \
     --state-weight "$STATE_WEIGHT" --image-weight "$IMAGE_WEIGHT" --latent-weight "$LATENT_WEIGHT" \
     --epochs "$EPOCHS" --seed "$SEED" --device "$DEVICE" --save-path "$R/wam.pt" | grep -E "Episodes:|Epoch $EPOCHS/| val:" | tail -3
