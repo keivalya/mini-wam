@@ -37,6 +37,7 @@ LATENT_WEIGHT="${LATENT_WEIGHT:-1.0}"
 STATE_INPUT="${STATE_INPUT:-1}"          # 0 = image + language only (no state_t input)
 ACTION_HEAD="${ACTION_HEAD:-mlp}"
 ACTION_CHUNK="${ACTION_CHUNK:-8}"        # predict the next K actions at once and execute K/2 (1 = one action per step)
+TEMPORAL_ENSEMBLE="${TEMPORAL_ENSEMBLE:-1}"  # 1 = predict a chunk every step and average the chunks' guesses (ACT)
 TEST_EPISODES="${TEST_EPISODES:-100}"
 DEVICE="${DEVICE:-auto}"
 OUT="${OUT:-results/$ENV_NAME}"
@@ -94,10 +95,12 @@ export PYTHONUNBUFFERED=1
 
 echo "[run] host=$(hostname) python=$($PYV --version) torch=$($PYV -c 'import torch; print(torch.__version__, torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu")')"
 echo "[run] cpus: $(nproc) slurm_job=${SLURM_JOB_ID:-none}"
-echo "[run] config: ENV_NAME=$ENV_NAME PUSHT_DATA=$PUSHT_DATA DEMOS=$DEMOS MODE=$MODE PLAN=$PLAN SEEDS='$SEEDS' EPOCHS=$EPOCHS EPISODES=$EPISODES MAX_STEPS=$MAX_STEPS RANDOM_ACTION_PROB=$RANDOM_ACTION_PROB HORIZON=$HORIZON ACTION_CHUNK=$ACTION_CHUNK STATE_WEIGHT=$STATE_WEIGHT IMAGE_WEIGHT=$IMAGE_WEIGHT LATENT_WEIGHT=$LATENT_WEIGHT STATE_INPUT=$STATE_INPUT ACTION_HEAD=$ACTION_HEAD TEST_EPISODES=$TEST_EPISODES"
+echo "[run] config: ENV_NAME=$ENV_NAME PUSHT_DATA=$PUSHT_DATA DEMOS=$DEMOS MODE=$MODE PLAN=$PLAN SEEDS='$SEEDS' EPOCHS=$EPOCHS EPISODES=$EPISODES MAX_STEPS=$MAX_STEPS RANDOM_ACTION_PROB=$RANDOM_ACTION_PROB HORIZON=$HORIZON ACTION_CHUNK=$ACTION_CHUNK TEMPORAL_ENSEMBLE=$TEMPORAL_ENSEMBLE STATE_WEIGHT=$STATE_WEIGHT IMAGE_WEIGHT=$IMAGE_WEIGHT LATENT_WEIGHT=$LATENT_WEIGHT STATE_INPUT=$STATE_INPUT ACTION_HEAD=$ACTION_HEAD TEST_EPISODES=$TEST_EPISODES"
 
 STATE_FLAG=""
 [ "$STATE_INPUT" = "0" ] && STATE_FLAG="--no_state_input"
+ENSEMBLE_FLAG=""
+[ "$TEMPORAL_ENSEMBLE" = "1" ] && ENSEMBLE_FLAG="--temporal-ensemble"
 TORCH_DEVICE="$DEVICE"   # scripts that take a torch device name, not "auto"
 [ "$DEVICE" = "auto" ] && TORCH_DEVICE="$($PYV -c 'import torch; print("cuda" if torch.cuda.is_available() else "cpu")')"
 
@@ -181,9 +184,9 @@ run_seed() {
 
   # 4. closed loop on unseen env seeds
   $PYV -m scripts.test --checkpoint "$R/wam.pt" --episodes "$TEST_EPISODES" --seed $((10000 + 1000 * SEED)) \
-    --max-steps "$MAX_STEPS" --device cpu --json-out "$R/wam_test.json" | tail -1
+    --max-steps "$MAX_STEPS" --device cpu $ENSEMBLE_FLAG --json-out "$R/wam_test.json" | tail -1
   $PYV -m scripts.test --checkpoint "$R/vla.pt" --episodes "$TEST_EPISODES" --seed $((10000 + 1000 * SEED)) \
-    --max-steps "$MAX_STEPS" --device cpu --json-out "$R/vla_test.json" | tail -1
+    --max-steps "$MAX_STEPS" --device cpu $ENSEMBLE_FLAG --json-out "$R/vla_test.json" | tail -1
   if [ "$ENV_NAME" = "pusht" ] && [ "$PLAN" = "1" ]; then
     $PYV -m scripts.test --checkpoint "$R/wam.pt" --planner mpc --episodes "$TEST_EPISODES" --seed $((10000 + 1000 * SEED)) \
       --max-steps "$MAX_STEPS" --device "$TORCH_DEVICE" --json-out "$R/wam_mpc_test.json" | tail -1
