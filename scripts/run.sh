@@ -26,7 +26,7 @@ case "$ENV_NAME" in
   *) echo "[run] unknown ENV_NAME=$ENV_NAME (use pusht or toy)"; exit 1 ;;
 esac
 SEEDS="${SEEDS:-0 1 2}"
-EPOCHS="${EPOCHS:-15}"
+EPOCHS="${EPOCHS:-100}"                 # long training: fitting the 206 demos closely is fine here
 EPISODES="${EPISODES:-$DEFAULT_EPISODES}"     # collected demonstrations per seed (90% train / 10% held out)
 MAX_STEPS="${MAX_STEPS:-$DEFAULT_MAX_STEPS}"  # per collected and tested episode
 RANDOM_ACTION_PROB="${RANDOM_ACTION_PROB:-$DEFAULT_RANDOM_ACTION_PROB}"   # exploration bursts in the data
