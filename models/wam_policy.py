@@ -60,6 +60,7 @@ class PicoWAMPolicy(nn.Module):
         use_state_input=True,
         diffusion_T=16,
         flow_steps=8,
+        action_chunk=1,
     ):
         super().__init__()
 
@@ -82,6 +83,7 @@ class PicoWAMPolicy(nn.Module):
             use_state_input=use_state_input,
             diffusion_T=diffusion_T,
             flow_steps=flow_steps,
+            action_chunk=action_chunk,
         )
 
         self.is_wam = model_type == "wam"
@@ -95,10 +97,12 @@ class PicoWAMPolicy(nn.Module):
         self.state_encoder = StateEncoderMLP(state_dim=state_dim, d_model=d_model)
         self.fusion = FusionMLP(d_model=d_model)
 
-        # policy: z -> a
+        # policy: z -> a, or with action_chunk = K > 1 the next K actions at once
+        # (as in Diffusion Policy); act() returns the first, act_chunk() all K
+        self.action_dim, self.action_chunk = action_dim, action_chunk
         self.policy_head = build_action_head(
             action_head,
-            action_dim=action_dim,
+            action_dim=action_dim * action_chunk,
             cond_dim=d_model,
             diffusion_T=diffusion_T,
             flow_steps=flow_steps,
@@ -170,6 +174,8 @@ class PicoWAMPolicy(nn.Module):
             state         : (B, state_dim)
             action        : (B, action_dim)             a_t
             is_expert     : (B,)  optional              imitate a_t only where 1
+            action_chunk  : (B, K, action_dim)          a_t ... a_t+K-1, if action_chunk = K > 1
+            chunk_expert  : (B,)                        1 where all K actions are expert actions
           WAM only:
             actions       : (B, Hz, action_dim)         a_t ... a_t+Hz-1
             future_images : (B, Hz, 3, H, W)            image_t+1 ... image_t+Hz
@@ -181,11 +187,14 @@ class PicoWAMPolicy(nn.Module):
 
         # the policy imitates expert actions only; exploration actions are
         # there to teach the world model what actions do
-        expert = batch["is_expert"] > 0.5 if "is_expert" in batch else slice(None)
+        target, mask = batch["action"], batch.get("is_expert")
+        if self.action_chunk > 1:
+            target, mask = batch["action_chunk"].flatten(1), batch["chunk_expert"]
+        expert = mask > 0.5 if mask is not None else slice(None)
         if isinstance(expert, torch.Tensor) and not expert.any():
             action_loss = z.sum() * 0.0
         else:
-            action_loss = self.policy_head.loss(batch["action"][expert], z[expert])
+            action_loss = self.policy_head.loss(target[expert], z[expert])
 
         outputs = {"z": z, "action_loss": action_loss}
 
@@ -213,8 +222,13 @@ class PicoWAMPolicy(nn.Module):
 
     @torch.no_grad()
     def act(self, image, text_tokens, state):
+        return self.act_chunk(image, text_tokens, state)[:, 0]
+
+    @torch.no_grad()
+    def act_chunk(self, image, text_tokens, state):
+        """(B, K, action_dim): the next K actions (K = 1 without action chunking)."""
         z = self.encode_obs(image, text_tokens, state)
-        return self.policy_head.sample(z)
+        return self.policy_head.sample(z).view(z.shape[0], self.action_chunk, self.action_dim)
 
     @torch.no_grad()
     def decode(self, z):
@@ -248,7 +262,7 @@ class PicoWAMPolicy(nn.Module):
         zs, acts = [z], []
 
         for k in range(horizon):
-            a = self.policy_head.sample(z) if actions is None else actions[:, k]
+            a = self.policy_head.sample(z)[:, : self.action_dim] if actions is None else actions[:, k]
             z = self.dynamics(z, a)
             zs.append(z)
             acts.append(a)

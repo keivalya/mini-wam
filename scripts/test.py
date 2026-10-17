@@ -40,8 +40,14 @@ def parse_args():
         help="Meta-World: language instruction (pusht and toy have their own).",
     )
     parser.add_argument("--lookahead", type=int, default=5, help="Imagination steps shown in the video.")
+    parser.add_argument("--execute-steps", type=int, default=None,
+                        help="With action chunks of K actions: how many to execute before predicting again (default K // 2).")
     parser.add_argument("--planner", type=str, default="policy", choices=["policy", "mpc"],
                         help="policy: act with the action head; mpc: plan with the world model (scripts/plan.py, Push-T).")
+    parser.add_argument("--planner-config", type=str, default="{}",
+                        help='JSON overrides for the planner, e.g. \'{"warm_start": true}\'.')
+    parser.add_argument("--check-plans-every", type=int, default=10,
+                        help="mpc on Push-T: every N steps, compare the chosen plan's imagined outcome with the simulator's (0 = never).")
     parser.add_argument("--device", type=str, default="cpu")
     parser.add_argument("--save-video", action="store_true")
     parser.add_argument("--video-dir", type=str, default="videos")
@@ -116,10 +122,11 @@ def main():
         import imageio.v2 as imageio
         os.makedirs(args.video_dir, exist_ok=True)
 
-    planner = None
+    planner, plan_checks = None, []
     if args.planner == "mpc":
         from scripts.plan import LatentPlanner
-        planner = LatentPlanner(model)
+        planner = LatentPlanner(model, **json.loads(args.planner_config))
+        sim = make_env(args, env_name, size)
 
     successes, lengths, coverages = 0, [], []
 
@@ -132,6 +139,7 @@ def main():
         done = False
         if planner is not None:
             planner.reset()
+        queue = []   # actions of the current chunk still to execute
         while not done and step < max_steps:
             img_t = to_tensor(img, size, device)
             state_t = torch.from_numpy(np.asarray(state)).float().unsqueeze(0).to(device)
@@ -140,8 +148,16 @@ def main():
                 frames.append(mind_frame(model, img_t, text_ids, state_t, args.lookahead)
                               if model.is_wam else to_np_img(img_t[0]))
 
-            act = model.act if planner is None else planner.act
-            action = act(img_t, text_ids, state_t).squeeze(0).cpu().numpy()
+            if planner is None and model.config.get("action_chunk", 1) > 1:
+                if not queue:
+                    k = args.execute_steps or max(1, model.config["action_chunk"] // 2)
+                    queue = list(model.act_chunk(img_t, text_ids, state_t)[0, :k].cpu().numpy())
+                action = queue.pop(0)
+            else:
+                act = model.act if planner is None else planner.act
+                action = act(img_t, text_ids, state_t).squeeze(0).cpu().numpy()
+                if planner is not None and args.check_plans_every and env_name == "pusht" and step % args.check_plans_every == 0:
+                    plan_checks.append(planner.check_last_plan(sim, np.asarray(state)))
             img, state, reward, done, info = env.step(action)
             success = max(success, int(info.get("success", 0)))
             best_coverage = max(best_coverage, info.get("coverage", 0.0))
@@ -167,7 +183,10 @@ def main():
     has_coverage = "coverage" in info
     print(f"[test] Success rate: {successes}/{args.episodes} = {successes / args.episodes:.0%} "
           f"| mean steps: {np.mean(lengths):.1f}"
-          + (f" | mean max coverage: {np.mean(coverages):.3f}" if has_coverage else ""))
+          + (f" | mean max coverage: {np.mean(coverages):.3f}" if has_coverage else "")
+          + (f" | chosen plans, block px: expected gain {np.mean([c['expected_gain_px'] for c in plan_checks]):+.1f}, "
+             f"real gain {np.mean([c['real_gain_px'] for c in plan_checks]):+.1f}, "
+             f"error {np.mean([c['plan_error_px'] for c in plan_checks]):.1f}" if plan_checks else ""))
 
     if args.json_out:
         out = {"success_rate": successes / args.episodes, "episodes": args.episodes,
@@ -175,6 +194,13 @@ def main():
         if has_coverage:
             # Push-T's usual score: the best coverage reached in each episode, averaged
             out["mean_max_coverage"] = float(np.mean(coverages))
+            out["max_coverage"] = [float(c) for c in coverages]
+        if planner is not None:
+            out["planner_config"] = {k: getattr(planner, k) for k in
+                                     ["horizon", "samples", "elites", "iterations", "noise", "approach_weight", "warm_start"]}
+            if plan_checks:
+                out["plan_checks"] = {k: float(np.mean([c[k] for c in plan_checks])) for k in plan_checks[0]}
+                out["plan_checks"]["n"] = len(plan_checks)
         with open(args.json_out, "w") as f:
             json.dump(out, f, indent=2)
 
