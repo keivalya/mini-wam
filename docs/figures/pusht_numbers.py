@@ -1,0 +1,165 @@
+"""Every Push-T number quoted in the paper, read from docs/results/pusht/.
+
+Writes docs/paper/pusht-numbers.tex, one LaTeX macro per number (e.g.
+\\PTbasePlan = mean best coverage of the planning WAM, in percent), and prints
+the same values as a table for the tutorial and README. Means are over
+training seeds; "sd" is the population standard deviation across seeds, as in
+docs/figures/pusht_figures.py (the supervision pilot uses the sample SD).
+
+    python docs/figures/pusht_numbers.py
+"""
+
+import glob
+import json
+import os
+
+import numpy as np
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+RESULTS = os.environ.get("PUSHT_RESULTS", os.path.join(HERE, "..", "results", "pusht"))
+OUT = os.path.join(HERE, "..", "paper", "pusht-numbers.tex")
+BLOCK = [4, 5, 6, 7]
+
+RUNS = {  # macro prefix -> results folder
+    "base": "baseline", "hone": "horizon-1", "hten": "horizon-10", "nolat": "no-latent", "noimg": "no-image",
+    "pix": "pixel-input", "dfifty": "demos-50", "dhundred": "demos-100", "expz": "expert-p0", "expone": "expert-p0.1",
+    "expthree": "expert-p0.3", "mixed": "mixed-p0.3", "diff": "diffusion-head", "chunk": "action-chunks",
+    "epochs": "epochs-100", "budget": "planner-budget", "wide": "wider-model",
+}
+
+
+def seeds(name):
+    out = []
+    for d in sorted(glob.glob(os.path.join(RESULTS, name, "seed[0-9]*"))):
+        out.append({os.path.basename(p)[:-5]: json.load(open(p)) for p in glob.glob(os.path.join(d, "*.json"))})
+    return out
+
+
+def stat(values, scale=1.0):
+    v = np.asarray(values, dtype=float) * scale
+    return v.mean(), v.std()
+
+
+def main():
+    macros = {}
+
+    def put(name, value, fmt):
+        macros[name] = fmt.format(value)
+
+    for prefix, folder in RUNS.items():
+        S = seeds(folder)
+        if not S:
+            continue
+        P = "PT" + prefix
+        for key, short in [("wam_test", "Wam"), ("vla_test", "Vla"), ("wam_mpc_test", "Plan"),
+                           ("wam_mpc_cem_test", "PlanCem"), ("wam_mpc_wide_test", "PlanWide"), ("wam_mpc_noprior_test", "PlanNoprior")]:
+            if all(key in s for s in S):
+                m, sd = stat([s[key]["mean_max_coverage"] for s in S], 100)
+                put(P + short, m, "{:.1f}")
+                put(P + short + "Sd", sd, "{:.1f}")
+                put(P + short + "Succ", sum(round(s[key]["success_rate"] * s[key]["episodes"]) for s in S), "{:d}")
+                if "plan_checks" in S[0][key]:
+                    for c, cname in [("expected_gain_px", "Expected"), ("real_gain_px", "Real"), ("plan_error_px", "PlanErr")]:
+                        put(P + short + cname, stat([s[key]["plan_checks"][c] for s in S])[0], "{:.1f}")
+        if all("wam_eval" in s for s in S):
+            e = [s["wam_eval"] for s in S]
+            for k, kname in [(1, "One"), (15, "Fifteen")]:
+                put(P + "State" + kname, stat([x["state_nmse"][k] for x in e])[0], "{:.4f}")
+                put(P + "Copy" + kname, stat([x["state_nmse_copy"][k] for x in e])[0], "{:.4f}")
+            put(P + "StateFifteenSd", stat([x["state_nmse"][15] for x in e])[1], "{:.4f}")
+            cf = [x["counterfactual"] for x in e]
+            put(P + "Cf", stat([c["wam_nmse"][9] for c in cf])[0], "{:.4f}")
+            put(P + "CfSd", stat([c["wam_nmse"][9] for c in cf])[1], "{:.4f}")
+            put(P + "Noop", stat([c["noop_nmse"][9] for c in cf])[0], "{:.3f}")
+            put(P + "CfBlock", stat([np.mean([c["wam_nmse_per_dim"][9][j] for j in BLOCK]) for c in cf])[0], "{:.4f}")
+            put(P + "NoopBlock", stat([np.mean([c["noop_nmse_per_dim"][9][j] for j in BLOCK]) for c in cf])[0], "{:.4f}")
+            put(P + "FactBlock", stat([np.mean([x["state_nmse_per_dim"][10][j] for j in BLOCK]) for x in e])[0], "{:.4f}")
+            put(P + "ImgOne", stat([x["image_mse"][1] for x in e])[0], "{:.5f}")
+            put(P + "ImgCopyOne", stat([x["image_mse_copy"][1] for x in e])[0], "{:.5f}")
+            put(P + "ImgFifteen", stat([x["image_mse"][15] for x in e])[0], "{:.5f}")
+            put(P + "ImgCopyFifteen", stat([x["image_mse_copy"][15] for x in e])[0], "{:.5f}")
+            put(P + "RtwoFifteen", stat([np.mean([r for r in x["state_r2"][15] if r is not None]) for x in e])[0], "{:.3f}")
+
+    checks_path = os.path.join(RESULTS, "data_checks.json")
+    if os.path.exists(checks_path):
+        c = json.load(open(checks_path))
+        put("PTdataClipped", c["clipped_actions"], "{:d}")
+        put("PTdataBlockErrPninetynine", c["replay"]["block_error_px_p99"], "{:.2f}")
+        put("PTdataBlockMove", c["replay"]["moving_block_step_px_median"], "{:.1f}")
+        put("PTdataRender", c["render"]["mean_abs_pixel_difference"], "{:.2f}")
+        put("PTdataDemoCoverage", 100 * c["demos"]["best_coverage_mean"], "{:.1f}")
+        put("PTdataDemoSuccesses", c["demos"]["successes"], "{:d}")
+        for e in c["expert"]:
+            tag = "Zero" if e["random_action_prob"] == 0 else "Tenth"
+            put("PTexpert" + tag + "Success", 100 * e["success_rate"], "{:.0f}")
+            put("PTexpert" + tag + "Steps", e["mean_steps"], "{:.0f}")
+
+    audit_path = os.path.join(RESULTS, "baseline", "dynamics_audit.json")
+    if os.path.exists(audit_path):
+        a = json.load(open(audit_path))["seeds"]
+        rows = list(a.values())
+        put("PTlinFactOne", stat([r["factual_nmse"]["state_action"][0] for r in rows])[0], "{:.4f}")
+        put("PTlinFactFifteen", stat([r["factual_nmse"]["state_action"][14] for r in rows])[0], "{:.4f}")
+        put("PTlinCf", stat([r["counterfactual_nmse"]["state_action"][9] for r in rows])[0], "{:.4f}")
+        put("PTlinCfBlock", stat([np.mean([r["counterfactual_nmse_per_dim"]["state_action"][9][j] for j in BLOCK]) for r in rows])[0], "{:.4f}")
+        put("PTlinCfAgentPx", stat([r["counterfactual_px_at_10"]["state_action"]["agent"] for r in rows])[0], "{:.1f}")
+        put("PTlinCfBlockPx", stat([r["counterfactual_px_at_10"]["state_action"]["block"] for r in rows])[0], "{:.1f}")
+        put("PTstateonlyFactFifteen", stat([r["factual_nmse"]["state_only"][14] for r in rows])[0], "{:.3f}")
+
+    eff = os.path.join(RESULTS, "baseline", "efficiency", "efficiency.json")
+    if os.path.exists(eff):
+        d = json.load(open(eff))
+        put("PTparamsWam", d["parameters"]["wam_total"], "{:,d}")
+        put("PTparamsVla", d["parameters"]["vla_total"], "{:,d}")
+        put("PTparamsDecoder", d["parameters"]["wam"]["image_decoder"], "{:,d}")
+        put("PTstepWam", d["train_step_ms"]["wam"] / 1e3, "{:.2f}")
+        put("PTstepStates", d["train_step_ms"]["wam_state_only"] / 1e3, "{:.2f}")
+        put("PTstepVla", d["train_step_ms"]["vla"], "{:.0f}")
+        put("PTactMs", d["latency_ms"]["act_wam"], "{:.1f}")
+        put("PTimagineTenMs", d["latency_ms"]["imagine_10_states"], "{:.2f}")
+        put("PTimagineTenImgMs", d["latency_ms"]["imagine_10_states_and_images"], "{:.1f}")
+
+    laptop = os.path.join(RESULTS, "baseline", "efficiency-laptop", "efficiency.json")
+    if os.path.exists(laptop):   # one thread of an Apple-silicon laptop CPU, like the point-mass benchmark
+        d = json.load(open(laptop))
+        put("PTlaptopStepWam", d["train_step_ms"]["wam"] / 1e3, "{:.2f}")
+        put("PTlaptopStepStates", d["train_step_ms"]["wam_state_only"] / 1e3, "{:.2f}")
+        put("PTlaptopStepVla", d["train_step_ms"]["vla"], "{:.0f}")
+        put("PTlaptopActMs", d["latency_ms"]["act_wam"], "{:.2f}")
+        put("PTlaptopPlanMs", d["latency_ms"]["plan_step"], "{:.0f}")
+        put("PTlaptopImagineTenMs", d["latency_ms"]["imagine_10_states"], "{:.2f}")
+        put("PTlaptopImagineTenImgMs", d["latency_ms"]["imagine_10_states_and_images"], "{:.1f}")
+
+    whatif = os.path.join(RESULTS, "baseline", "figure-data", "what_if.npz")
+    if os.path.exists(whatif):   # 15-step constant pushes in 8 directions, unit-square endpoint distance
+        w = np.load(whatif)
+        for key, name in [("endpoint_error", "Agent"), ("ignore_push_error", "AgentIgnore"),
+                          ("block_endpoint_error", "Block"), ("block_ignore_push_error", "BlockIgnore")]:
+            v = w[key][:, 1:].mean(1)   # mean over the 8 directions, per seed
+            put("PTwhatif" + name, v.mean(), "{:.3f}")
+            put("PTwhatif" + name + "Sd", v.std(), "{:.3f}")
+
+    if "PTbaseStateFifteen" in macros:
+        put("PTbaseCopyRatio", float(macros["PTbaseCopyFifteen"]) / float(macros["PTbaseStateFifteen"]), "{:.0f}")
+
+    pilot = os.path.join(RESULTS, "supervision-pilot", "summary.json")
+    if os.path.exists(pilot):
+        p = json.load(open(pilot))
+        for c, cname in [("bc", "Bc"), ("current", "Cur"), ("future", "Fut")]:
+            put("PTpilot" + cname, 100 * p["coverage_summary"][c]["mean"], "{:.1f}")
+            put("PTpilot" + cname + "Sd", 100 * p["coverage_summary"][c]["sample_sd"], "{:.1f}")
+        put("PTpilotFutMinusCur", 100 * p["coverage_summary"]["future-minus-current"]["mean"], "{:.1f}")
+        put("PTpilotCurMinusBc", 100 * p["coverage_summary"]["current-minus-bc"]["mean"], "{:.1f}")
+
+    with open(OUT, "w") as f:
+        f.write("% Generated by docs/figures/pusht_numbers.py from docs/results/pusht/. Do not edit by hand.\n")
+        for k, v in sorted(macros.items()):
+            f.write(f"\\newcommand{{\\{k}}}{{{v}}}\n")
+    width = max(len(k) for k in macros)
+    for k, v in sorted(macros.items()):
+        print(f"{k:<{width}}  {v}")
+    print(f"\n{len(macros)} numbers -> {OUT}")
+
+
+if __name__ == "__main__":
+    main()

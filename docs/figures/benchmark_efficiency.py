@@ -119,6 +119,12 @@ def main():
             latency[f"imagine_{k}_states_and_images"] = timeit(
                 lambda acts=acts, k=k: wam.image_decoder(wam.dynamics.rollout(z, acts)), repeats=50)
 
+        # Push-T: one planning step (scripts/plan.py, default settings), batch 1
+        if wam.config["state_dim"] == 8 and wam.predict_state:
+            from scripts.plan import LatentPlanner
+            planner = LatentPlanner(wam)
+            latency["plan_step"] = timeit(lambda: planner.act(img, txt, st), repeats=50, warmup=5)
+
     weights = LossWeights()
     starts = ds.starts[:64]
     batch = next(ds.batches(starts, 64, shuffle=False))
