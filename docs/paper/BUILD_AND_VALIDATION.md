@@ -1,27 +1,34 @@
 # Building and checking the manuscript
 
-The authoritative manuscript is `pico-wam-paper.tex`; `docs/pico-wam-paper.md` is the explicitly marked historical tutorial. The verified working PDF is 12 pages including references, within the requested 10–12 pages. It is not formatted for an actual conference submission.
+The authoritative manuscript is `pico-wam-paper.tex`. It reports both environments: the point-mass navigation study and the Push-T study. The tutorial, `docs/pico-wam-paper.md`, covers Push-T only and uses the same stored results. Neither is formatted for a conference submission.
 
 From the repository root:
 
 ```sh
-python3 docs/figures/research_figures.py
+python docs/figures/make_figures.py      # point-mass figures, from docs/results/<experiment>/
+python docs/figures/pusht_figures.py     # Push-T figures, from docs/results/pusht/
+python docs/figures/pusht_numbers.py     # every Push-T number in the paper -> docs/paper/pusht-numbers.tex
 tectonic --keep-logs docs/paper/pico-wam-paper.tex
-pdfinfo docs/paper/pico-wam-paper.pdf
-pdftoppm -scale-to 1600 -png docs/paper/pico-wam-paper.pdf /tmp/pico-wam-paper
 ```
 
-The built-in Codex editor was opened and its compiler attempted. That compiler cannot resolve the external figure assets in this multi-file project. The existing system Tectonic compiler successfully resolves them and produces the PDF; no TeX installation was added. Keep the source open for editing and use the compiled PDF for the complete preview.
+The paper reads every Push-T number from `pusht-numbers.tex` as a LaTeX macro, for example `\PTbasePlan`, so no Push-T result is typed by hand. Rerun `pusht_numbers.py` after changing anything in `docs/results/pusht/`. Each figure script audits its own output, checking widths, fonts, labels, text size and overlapping text, and prints `figure audit ...: clean` or the problems it found.
 
-Validation performed during revision:
+## Validation
 
-- Recomputed selected archived values directly from per-experiment summaries; spreads in those files use population SD, not sample SD or confidence intervals.
-- Ran the fresh affine/simulator audit over five collection seeds; retained complete metrics and source hashes.
-- Compiled the three new experiment/figure scripts and ran a one-epoch CPU smoke experiment through all three supervision conditions on a tiny eight-episode dataset. Its zero-success outcomes are smoke-test data only, not paper results.
-- Checked the batched policy evaluator against sequential evaluation on four identical initial-state seeds.
-- Checked that the current-state auxiliary objective sends gradients into the visual encoder and none into the dynamics module.
-- Compiled the revised LaTeX without undefined-reference or overfull-box warnings; checked page count and rendered pages visually.
+Point-mass study:
 
-The pilot uses the same full model initialization for each condition, leaving unused modules untouched in BC/current-state conditions. Only their policy outputs are meaningful; those unused dynamics checkpoints must not be reported as trained world models. `training_seconds` in the initial pilot script includes its subsequent evaluation time, so it is an end-to-end condition runtime, not a training-only timing benchmark. CUDA kernels are not forced into deterministic algorithms: seeds control initialization and minibatch order, not guaranteed cross-device bitwise reproducibility.
+- Selected archived values were recomputed directly from per-experiment summaries; spreads in those files use population SD, not sample SD or confidence intervals.
+- The affine/simulator audit was run over five collection seeds, with complete metrics and source hashes.
+- The supervision pilot was checked for paired test IDs, equal update counts, complete conditions and local source hashes (Explorer array 11088783, all exit codes 0:0).
+- The batched policy evaluator was checked against sequential evaluation on four identical initial-state seeds, and the current-state auxiliary objective was checked to send gradients into the visual encoder and none into the dynamics module.
 
-The five-seed Explorer pilot completed successfully (array 11088783, all exit codes 0:0). All 15 condition outputs, paired test IDs, equal update counts and local source hashes were verified. Final PDF pages were rendered and visually inspected, including the pilot table; compilation had no undefined-reference or overfull-box warnings.
+Push-T study:
+
+- The converted LeRobot data were checked against the simulator (`scripts/pusht_data_checks.py`, stored in `docs/results/pusht/data_checks.json`): replayed block positions, rendered frames against the dataset's frames, the demonstrations' coverage, and the scripted expert's success rate.
+- `simulate()` reproduces `step()` exactly from any state, so every counterfactual prediction and plan check is compared with the true outcome.
+- Every results folder in `docs/results/pusht/` is mapped to its experiment branch, commit and run in `docs/results/pusht/README.md`. The planner-budget run hit its time limit after its three seeds were tested; its numbers come from the per-seed files, like every other folder.
+- Planner settings were chosen on development starts (env seeds 90000 and above), never on test starts.
+
+The pilots use the same full model initialization for each condition, leaving unused modules untouched in the cloning and current-state conditions. Only their policy outputs are meaningful; those unused dynamics checkpoints must not be reported as trained world models. CUDA kernels are not forced into deterministic algorithms: seeds control initialization and minibatch order, not bitwise reproducibility across devices.
+
+The final PDF was compiled without undefined references or overfull boxes, and its pages were rendered and inspected.

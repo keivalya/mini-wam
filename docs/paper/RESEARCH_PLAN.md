@@ -1,6 +1,6 @@
 # pico-WAM: research assessment and execution plan
 
-Reviewed October 14, 2026 (America/New_York). This is a research decision document, not a claim of publication readiness.
+Reviewed October 14, 2026 and updated October 17, 2026 (America/New_York). This is a research decision document, not a claim of publication readiness.
 
 ## Assessment
 
@@ -15,8 +15,8 @@ The best possible research direction is **separating the benefit of privileged s
 | Random exploration improves learned dynamics | Plausible familiar result; archived data confounds coverage with distribution and scale | Fixed state bank, fixed transition budget, common normalization, action-sensitivity tests |
 | Imagining futures recovers hidden velocity | Overstated: renderer cannot distinguish opposite velocities; known controls and damping reduce future uncertainty | Matched histories, ambiguous observations, calibrated belief prediction, deployment mechanism |
 | Pixel-input WAM improves policy | Interesting preliminary observation, 3 seeds with large variation | BC + current-state auxiliary targets, future-state-only targets, history baseline, equal starts and updates |
-| Linear readout reveals emergent physical knowledge | Jointly trained with true-state targets, often true-state inputs | Frozen representation and separately fitted probes; held-out probe split and nuisance controls |
-| World model improves planning | Not evaluated by original deployment | Matched planner with learned, direct-state and oracle dynamics; latency and regret |
+| Linear readout reveals emergent physical knowledge | Jointly trained with true-state targets, often true-state inputs | Frozen representation and separately fitted probes; unseen probe split and nuisance controls |
+| World model improves planning | Evaluated on Push-T (October 2026): planning near the policy beats the reactive policies, and stronger search exploits model errors | Oracle-dynamics and direct-state planners with the same cost; a learned cost; latency and regret |
 | This toy needs a sophisticated dynamics model | Contradicted by new restricted-model audit | Harder dynamics/observation settings and structured baselines |
 
 ## What has actually been done
@@ -27,6 +27,16 @@ The best possible research direction is **separating the benefit of privileged s
 - Ran `scripts/research_audit.py` for five seeds. An affine state+action predictor with a known clipping prior fits the toy transition to numerical precision even from deterministic expert trajectories. Action-free predictors fail under randomized interventions. Opposite-velocity scenes render identically, and sampled `simulate`/`step` checks agree. See `../results/research-audit/README.md` for full protocol and limitations.
 - Ran Explorer array **11088783**, training 15 models across five seeds. Mean success was 17.0% for BC, 28.4% with current-state supervision, and 33.6% with additional future-state prediction. Future-minus-current paired differences were +7, +9, +4, -2, +8 percentage points. This is an exploratory pilot with low absolute success, not a convergence or significance claim. Complete per-seed outputs are under `../results/supervision-pilot/`.
 - Added `scripts/supervision_ablation.py` and an Explorer Slurm launcher. This pilot compares BC, current-state auxiliary prediction, and current+future state prediction under identical H=5 starts, encoder/policy initialization, expert masks, minibatch order, and update count. It deliberately excludes pixel and latent-consistency losses to isolate the extra future-state term. It is not a reproduction of the archived full WAM.
+
+### Push-T study, October 2026
+
+Stage 4's step beyond the toy was taken with Push-T, trained on LeRobot's 206 human demonstrations; the simulator was rebuilt so that `simulate()` reproduces `step()` exactly. Thirty runs on Explorer, stored in `../results/pusht/`, cover prediction, data coverage, objective and model variants, planning budgets, the supervision pilot, and the changes that make the policies succeed. What they settled:
+
+- Factual accuracy does not imply counterfactual accuracy on Push-T either: trained on human demonstrations, the model predicts the block's response to new pushes worse than assuming it stays put. Simulator branches of the demonstrations fix this. Because branches start from states the humans visited, they separate action coverage from state coverage better than scripted data, though not completely: eight perturbed steps still reach new states.
+- Planning with the learned dynamics is the first measured control benefit of the world model. Plan checks against the simulator show that more search, or a warm-started search, exploits model errors.
+- The matched pilot again attributes most of the auxiliary gain to current-state supervision; future-state prediction added nothing on Push-T.
+
+Still open: oracle-dynamics and direct-state planners with the same cost, a history-based baseline, a learned cost, and branches that a real robot could collect.
 
 ## Nearest prior work and novelty risk
 
@@ -84,7 +94,7 @@ This hypothesis overlaps AD-WM; novelty requires demonstrating a distinct failur
 
 ### Stage 4 — Test beyond the toy (two to four weeks, resource dependent)
 
-Select a small, fixed set of contact-rich manipulation tasks from the existing Meta-World integration, such as pushing and pick-and-place, after verifying installed task versions. Include occlusion/history, changes in mass/friction, goal distractors and held-out layouts. Use at least two qualitatively different dynamics/observation regimes. If the paper's claim is about robot deployment, add a real-robot validation with a collaborator; simulation-only evidence must make its transfer argument explicit.
+Select a small, fixed set of contact-rich manipulation tasks from the existing Meta-World integration, such as pushing and pick-and-place, after verifying installed task versions. Include occlusion/history, changes in mass/friction, goal distractors and unseen layouts. Use at least two qualitatively different dynamics/observation regimes. If the paper's claim is about robot deployment, add a real-robot validation with a collaborator; simulation-only evidence must make its transfer argument explicit.
 
 Record data collection cost, task versions, camera calibration, success definitions, assets and licenses. Preserve failed episodes and select qualitative examples by declared rules (fixed seed or representative quantile), not visual appeal. An expensive pretrained VLA comparison is unnecessary unless the claim explicitly concerns that class of model; matched modest baselines are the priority.
 

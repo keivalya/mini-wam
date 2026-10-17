@@ -14,7 +14,7 @@ Its example task is **Push-T**, the benchmark from [Diffusion Policy](https://di
 <div align="center">
   <img src="./assets/pusht_dream.gif" alt="A real Push-T episode next to pico-WAM's imagined and dreamed versions of it">
   <br>
-  <em>Left: a real Push-T episode from the held-out human demonstrations. Middle, imagined: what pico-WAM predicts from the first frame alone when it is given the actions the person actually took. Right, dreamed: what it predicts when its own policy chooses every action inside its imagination.</em>
+  <em>The final pico-WAM model. Left: a real Push-T episode from the unseen human demonstrations. Middle, imagined: what pico-WAM predicts from the first frame alone when it is given the actions the person actually took. Right, dreamed: what it predicts when its own policy chooses every action inside its imagination.</em>
 </div>
 
 The codebase is intentionally small (the whole model package is under 1,000 lines) so that,
@@ -26,23 +26,31 @@ The codebase is intentionally small (the whole model package is under 1,000 line
 > Start with the paper. It describes the design and every experiment in this repository.
 > - **pico-WAM: Design and Evaluation of a Compact World Action Model** ([PDF](docs/paper/pico-wam-paper.pdf), [LaTeX source](docs/paper/pico-wam-paper.tex))
 > - [Research plan](docs/paper/RESEARCH_PLAN.md): open questions, confounds, and next experiments
-> - [Hands-on tutorial](docs/pico-wam-paper.md): an earlier, longer walkthrough (the PDF is authoritative where they differ)
+> - [Hands-on tutorial](docs/pico-wam-paper.md): the Push-T study explained step by step, for readers coming from VLAs
 > - Blog: From VLAs to WAMs (Math, Code, and Intuition), **TBD**
 
 This project is not meant to be state-of-the-art. The architecture uses established components; the contribution is a clear, hackable implementation and a controlled study of how its parts behave.
 
 ## What the paper finds
 
-The paper's experiments predate the Push-T example: they use a 2D point-mass navigation task, which stays in the repository as `--env toy` for reproduction. Its dynamics are known exactly, so every prediction, including predictions under actions the expert never took, can be checked against the true simulator. Main comparisons use three independent runs and the supervision pilot uses five; ± is the standard deviation across runs.
+The paper studies pico-WAM in two environments whose simulators can replay any alternative action, so every prediction, including predictions under actions nobody took, can be checked against the truth: **Push-T**, trained on LeRobot's human demonstrations, and a 2D **point-mass** navigation task with exactly known dynamics. Main comparisons use three independent runs and the supervision pilots five; ± is the standard deviation across runs, and every Push-T policy is tested on 100 unseen starts per run.
 
-- **State prediction works.** Fifteen steps ahead, normalized state error is 0.0071 ± 0.0004, about 80× lower than persistence (0.5824).
-- **Image prediction does not, yet.** Decoded frames are worse than copying the current frame at every horizon. In the paper's example episode, the decoder keeps the agent and the selected goal but loses the distractor.
-- **Data coverage matters for "what if" questions.** Expert-only training gives lower factual error but about 15× higher error under random alternative actions (0.112 vs. 0.0072 at 10 steps) than training with random-action bursts. An affine model with the known clipping rule still recovers the simulator from expert data alone, so the gap comes from neural model fitting, not from missing information in the demonstrations.
-- **Auxiliary supervision helps the pixel-input policy.** With image inputs, success rises from 36.0 ± 19.8% for the VLA baseline to 80.3 ± 12.0% for the WAM, but the WAM also receives state targets that the VLA does not. A matched five-run pilot gives 17.0% for behavioral cloning alone, 28.4% with current-state supervision, and 33.6% with added future-state prediction, so current-state supervision contributes more of the gain (11.4 points) than future-state prediction (5.2 points).
-- **With state inputs, both policies are strong.** On 400 episodes, WAM and VLA both reach 100% success. On 25 episodes the WAM trails (87.0% vs. 99.7%) until longer training closes most of the gap (96.3% vs. 98.7%).
-- **Image decoding dominates cost.** The decoder holds about half of the 747,739 parameters. Removing it cuts a CPU optimizer step from 2.55 s to 0.27 s (about 90%). Policy inference takes about 0.42 ms for both WAM and VLA, since neither calls the dynamics at deployment.
+On Push-T:
 
-The paper also places pico-WAM's design choices alongside eight open-source systems (GR-1, UWM, WorldVLA, Genie Envisioner, Cosmos Policy, V-JEPA 2-AC, DreamGen and LingBot-VA) and lists its limitations: the dynamics are affine away from the walls, the policy does not plan with its predictions, and a history-based baseline is still missing.
+- **Predictions are good along human actions, and poor under new ones.** Fifteen steps ahead, the state error is 0.0178 nMSE, 44× lower than assuming nothing moves. Under pushes people never made, the model predicts the T worse than assuming it stays put: 1.36× that error.
+- **Showing the world model other pushes fixes it.** Branching every human demonstration in the simulator, with the human's actions slightly perturbed, brings the T's error down to 0.45× "stays put". Only the world model learns from the branches.
+- **Planning with the world model beats the policy, if the search stays close to the policy.** A stronger search makes the model expect 82.1 px of improvement from its plans while the simulator delivers −1.9 px: the planner finds the model's errors. A planner that reuses its last plan drifts the same way over an episode, so the final planner restarts every search from the policy's plan.
+- **Three simple changes make it succeed.** With action chunks, branched data and a planner that restarts from the policy, the planning WAM succeeds in 77 of 300 unseen episodes, against 57 for the behavioral-cloning baseline mini-VLA. Mini-VLA reaches a higher mean best coverage, 63.5% against 56.8%.
+- **It's cheap.** A planning step, 256 imagined futures of 12 steps, takes 32 ms on one laptop CPU thread. A latent of 64 numbers is worse and 256 is no better than 128, and the image decoder is not needed for planning. The whole Push-T study took about 60 GPU-hours.
+
+On the point-mass world:
+
+- **State prediction works, image prediction does not, yet.** Fifteen steps ahead, normalized state error is 0.0071 ± 0.0004, about 80× lower than persistence, while decoded frames are worse than copying the current frame at every horizon.
+- **Data coverage matters for "what if" questions.** Expert-only training gives about 15× higher error under random alternative actions than training with random-action bursts (0.112 vs. 0.0072 at 10 steps), even though an affine model recovers the simulator from expert data alone.
+- **Supervising the current state does most of the work.** With image inputs, the WAM reaches 80.3 ± 12.0% success against 36.0 ± 19.8% for mini-VLA, but it also receives state targets. A matched pilot gives 17.0% for cloning, 28.4% with current-state supervision and 33.6% with future-state prediction added. On Push-T, the same pilot gives 6.3%, 14.2% and 11.7% best coverage.
+- **Image decoding dominates cost.** The decoder holds about half of the 747,739 parameters, and removing it cuts a CPU optimizer step from 2.55 s to 0.27 s.
+
+The paper also places pico-WAM's design choices alongside eight open-source systems (GR-1, UWM, WorldVLA, Genie Envisioner, Cosmos Policy, V-JEPA 2-AC, DreamGen and LingBot-VA) and planners on Push-T (DINO-WM and PILOT), and lists its limitations: privileged state inputs, a hand-written planning cost, branches that need a simulator, and no history-based baseline yet.
 
 ## How pico-WAM is built
 
@@ -50,13 +58,15 @@ pico-WAM is a VLA-style policy with a world model trained alongside it. The poli
 
 - [models/encoders.py](models/encoders.py) encodes the 64×64 image (a three-layer CNN with 16 spatial-softmax keypoints, or a plain pooled CNN), the instruction (a GRU) and the low-dimensional state (an MLP)
 - [models/fusion.py](models/fusion.py) fuses them with an MLP and layer norm into a 128-dimensional latent `z_t`
-- [models/action_heads.py](models/action_heads.py) turns `z_t` into an action with an MLP head; [diffusion](models/diffusion_head.py) and [flow-matching](models/flow_matching_head.py) heads are also included (the paper's control experiments use the MLP head)
+- [models/action_heads.py](models/action_heads.py) turns `z_t` into an action, or a chunk of the next K actions, with an MLP head; [diffusion](models/diffusion_head.py) and [flow-matching](models/flow_matching_head.py) heads are also included (the paper's control experiments use the MLP head)
 - [models/dynamics_head.py](models/dynamics_head.py) holds the transition model, a residual MLP `z_t+1 = LN(z_t + MLP[z_t, a_t])`, and a *linear* `StateReadout` that maps any latent, encoded or predicted, to the physical state
 - [models/image_decoder.py](models/image_decoder.py) decodes any latent into an image, predicted as a residual on the training-set mean image
 - [models/losses.py](models/losses.py) combines the action, state, image and latent-consistency losses
 - [models/wam_policy.py](models/wam_policy.py) puts everything together, including `imagine()` for multi-step rollouts in latent space
 
-Training uses windows of `H = 5` transitions and minimizes `L_act + 0.5 L_state + L_image + L_latent`. The action loss uses only expert-labeled steps; the prediction losses use every transition, including random-action bursts. Dropping the auxiliary losses gives the behavioral-cloning baseline, labeled VLA in the paper.
+Training uses windows of `H = 5` transitions and minimizes `L_act + 0.5 L_state + L_image + L_latent`. The action loss uses only expert-labeled steps; the prediction losses use every transition, including random-action bursts and simulator branches. Dropping the world model and its losses leaves [mini-VLA](https://github.com/keivalya/mini-vla), the small VLA that pico-WAM extends, with the same encoders and action head; it is the behavioral-cloning baseline in every experiment.
+
+The WAM can also act by planning with its own world model ([scripts/plan.py](scripts/plan.py)): at every step it imagines 256 action sequences around its policy's plan, reads the T's predicted pose out of each imagined latent, and executes the first action of the best one. The planner never calls the simulator.
 
 Environments and data:
 - [envs/pusht_env.py](envs/pusht_env.py) is Push-T, rebuilt headless with [pymunk](https://www.pymunk.org/) and the original's physics constants, and drawn like the dataset's frames. Two changes suit a world model: an action moves the agent's target up to 100 px from where the agent is (so a random action is a local nudge), and the block's velocity is reset every control step (so the observed state, agent position and velocity plus block pose, fully determines the next one and every prediction can be checked against the simulator). From a recorded state, it predicts the human demonstrations' next block position to within 0.6 px in 99% of steps
@@ -65,14 +75,16 @@ Environments and data:
 - [envs/toy_point_env.py](envs/toy_point_env.py) is the paper's 2D point-mass world
 
 Scripts:
+- [scripts/branch_demos.py](scripts/branch_demos.py) branches the human demonstrations in the simulator: from every 4th visited state, it replays the next 8 human actions with noise added, so the world model sees what other pushes would have done
 - [scripts/collect_data.py](scripts/collect_data.py) collects demonstrations with a scripted expert, plus short random-action bursts so the world model sees actions the expert would never take
-- [scripts/train.py](scripts/train.py) trains the WAM, or the VLA baseline with `--model_type vla`
-- [scripts/evaluate.py](scripts/evaluate.py) measures prediction on held-out episodes, both factual (recorded actions) and counterfactual (random actions checked against the simulator)
+- [scripts/train.py](scripts/train.py) trains the WAM, or the mini-VLA baseline with `--model_type vla`
+- [scripts/evaluate.py](scripts/evaluate.py) measures prediction on unseen episodes, both factual (recorded actions) and counterfactual (random actions checked against the simulator)
 - [scripts/visualize_rollout.py](scripts/visualize_rollout.py) shows what the model predicts: rollout strips, state beliefs, latent maps, what-if plots and keypoints
-- [scripts/test.py](scripts/test.py) runs the policy in closed loop and saves videos of the real frame next to the decoded present and future
+- [scripts/test.py](scripts/test.py) runs the policy, or the planner with `--planner mpc`, in closed loop and saves videos of the real frame next to the decoded present and future
 - [scripts/run.sh](scripts/run.sh) runs the full pipeline on Push-T (LeRobot data) over three independent runs, and [scripts/run_toy.sh](scripts/run_toy.sh) runs it on the paper's point-mass world
 - [scripts/supervision_ablation.py](scripts/supervision_ablation.py) runs the matched-supervision pilot
-- [scripts/research_audit.py](scripts/research_audit.py) runs the affine dynamics diagnostic
+- [scripts/research_audit.py](scripts/research_audit.py) runs the point-mass affine dynamics diagnostic, and [scripts/pusht_dynamics_audit.py](scripts/pusht_dynamics_audit.py) fits linear models of the Push-T dynamics to compare with
+- [scripts/pusht_data_checks.py](scripts/pusht_data_checks.py) checks the converted LeRobot data against the simulator
 
 # Video
 
@@ -108,7 +120,13 @@ This downloads LeRobot's Push-T dataset (206 human demonstrations, about 10 MB) 
 python -m scripts.download_pusht --output-path data/pusht.npz
 ```
 
-The human demonstrations never reach Push-T's success threshold (the T covering 95% of the target): their best coverage averages 84.8%. Every action in them is a human one, so the world model only sees the actions people chose. For "what if" studies, the scripted expert can collect data with random-action bursts instead: when no burst is active, the collector starts one with probability 0.1 (`--random-action-prob`), and each burst lasts one to three steps. These random actions train the world model but are excluded from action regression.
+The human demonstrations never reach Push-T's success threshold (the T covering 95% of the target): their best coverage averages 84.8%. Every action in them is a human one, so a world model trained on them only sees the actions people chose. To show it what other pushes do, branch the demonstrations in the simulator: from every 4th state a person visited, replay their next 8 actions with a little noise added, and record what really happens. This adds 6,013 short branches, 48,104 transitions. Branches are marked as non-expert, so only the world model learns from them; the policy never imitates them.
+
+```
+python -m scripts.branch_demos data/pusht.npz --output-path data/pusht_branched.npz
+```
+
+For data-coverage studies, the scripted expert can also collect data with random-action bursts: when no burst is active, the collector starts one with probability 0.1 (`--random-action-prob`), and each burst lasts one to three steps.
 
 ```
 python -m scripts.collect_data \
@@ -122,29 +140,31 @@ python -m scripts.collect_data \
 
 ## Train your WAM model
 
-Train the policy and the world model together on your dataset. Use a GPU if you have one: `--device auto` picks CUDA or Apple's MPS. On an Apple-silicon laptop, an optimizer step takes about 0.2 s, so 15 epochs on the Push-T data take roughly 20 minutes; on CPU alone they take hours.
+Train the policy and the world model together, on the demonstrations plus their branches. The final configuration predicts chunks of 8 actions, executing 4 before predicting again, and trains for 100 epochs. Use a GPU if you have one: `--device auto` picks CUDA or Apple's MPS. Leave out `--predict_image` to train about five times faster: the image decoder lets you watch the model's imagination, but the planner does not need it.
 
 ```
 python -m scripts.train \
-  --dataset-path data/pusht.npz \
+  --dataset-path data/pusht_branched.npz \
   --model_type wam \
   --action_head mlp \
+  --action-chunk 8 \
   --predict_state \
   --predict_image \
-  --epochs 15 \
+  --epochs 100 \
   --save-path checkpoints/wam.pt \
   --device auto
 ```
 
-Train the VLA baseline (same encoders, no world model) on the same data with `--model_type vla` (and drop `--predict_state --predict_image`). Add `--no_state_input` to either model for the pixel-input setting: the policy then sees only the image and instruction, and the WAM still uses state as a training target.
+Train the mini-VLA baseline (same encoders and action head, no world model) on the demonstrations alone, `data/pusht.npz`, with `--model_type vla` (and drop `--predict_state --predict_image`). Add `--no_state_input` to either model for the pixel-input setting: the policy then sees only the image and instruction, and the WAM still uses state as a training target.
 
 ## Test your model in sim
 
-Run the trained WAM on unseen episodes. With `--save-video`, every frame shows the real observation next to what the model believes now and what it expects a few steps ahead. Push-T episodes stop at success or after 300 steps; besides the success rate, the script reports the best coverage reached in each episode, Push-T's usual score.
+Run the trained WAM on unseen episodes. With `--save-video`, every frame shows the real observation next to what the model believes now and what it expects a few steps ahead. Push-T episodes stop at success or after 300 steps; besides the success rate, the script reports the best coverage reached in each episode, Push-T's usual score. Add `--planner mpc` to let the WAM plan with its world model instead of acting with its policy alone.
 
 ```
 python -m scripts.test \
   --checkpoint checkpoints/wam.pt \
+  --planner mpc \
   --episodes 20 \
   --device cpu \
   --save-video \
@@ -153,7 +173,7 @@ python -m scripts.test \
 
 ## Look inside the world model
 
-Measure how well it predicts held-out futures (and "what if" futures under random actions), then visualize what it believes.
+Measure how well it predicts unseen futures (and "what if" futures under random actions), then visualize what it believes.
 
 ```
 python -m scripts.evaluate --checkpoint checkpoints/wam.pt
@@ -162,27 +182,30 @@ python -m scripts.visualize_rollout --checkpoint checkpoints/wam.pt --video --gi
 
 ## Run everything at once
 
-`scripts/run.sh` gets the data, trains the WAM and the VLA baseline, evaluates, tests and visualizes, over three independent runs, then summarizes them. Every run uses the same LeRobot demonstrations with a different train/validation split and initialization (`PUSHT_DATA=expert` collects scripted data instead). Results land in `results/pusht/` and the figures and dream GIF in `outputs/pusht/`. It **deletes `results/pusht/` when it starts**.
+`scripts/run.sh` gets the data, branches it, trains the WAM and the mini-VLA baseline, evaluates, tests the policies and the planner, and visualizes, over three independent runs, then summarizes them. Every run uses the same LeRobot demonstrations with a different train/validation split and initialization. Results land in `results/pusht/` and the figures and dream GIF in `outputs/pusht/`. It **deletes `results/pusht/` when it starts**.
 
 ```sh
 bash scripts/run.sh
 ```
 
-On one V100 GPU, the three runs take about 40 minutes. In the first such run, the world model predicts well even though it only saw human actions: 15 steps ahead its normalized state error is 0.016, against 0.78 for assuming nothing moves, and under random actions it stays at 0.030 ten steps ahead. The policies are a different story. Neither single-frame MLP policy solves Push-T: their best coverage averages 15% (WAM) and 22% (VLA), against 85% for the human demonstrations and 6% to 8% for doing nothing.
+On one V100 GPU, the three runs of the final configuration take about three hours, including all tests. Set `PREDICT_IMAGE=0` to skip the image decoder and train about five times faster; the planner does not need it. In the stored run, the planning WAM succeeds in 77 of 300 unseen episodes and mini-VLA in 57, and the world model predicts the state 15 steps ahead with nMSE 0.0083, against 0.4973 for assuming nothing moves.
 
 ## Reproducing the paper
 
-Stored results for every experiment are in [docs/results/](docs/results/), and the figures can be regenerated from them without retraining. Original training datasets and checkpoints are not included.
+Stored results for every experiment are in [docs/results/](docs/results/): the point-mass study at the top level and the Push-T study in [docs/results/pusht/](docs/results/pusht/README.md), whose README maps every folder to its experiment branch, commit and run. Figures and numbers can be regenerated from them without retraining. Training datasets and checkpoints are not included.
 
 | Paper result | Script | Stored outputs |
 |---|---|---|
-| Prediction, data coverage, ablations and policy success | `scripts/run_toy.sh`, then `python -m scripts.summarize_runs --root results` | `docs/results/<experiment>/` |
-| Matched-supervision pilot | `scripts/hpc/supervision_pilot.sbatch` (Slurm), which runs `scripts/supervision_ablation.py` | [docs/results/supervision-pilot/](docs/results/supervision-pilot/README.md) |
-| Affine dynamics diagnostic | `python3 scripts/research_audit.py --seeds 5 --output docs/results/research-audit` | [docs/results/research-audit/](docs/results/research-audit/README.md) |
-| Parameter and runtime benchmark | `python docs/figures/benchmark_efficiency.py --run-dir <dir with wam.pt, vla.pt, toy.npz>` | `docs/results/efficiency/` |
-| Figures | `python docs/figures/make_figures.py` | `docs/figures/` |
+| Push-T: prediction, data, planning, variants and the final configuration | `scripts/run.sh` on each experiment's branch | `docs/results/pusht/<experiment>/` |
+| Push-T: data checks | `python -m scripts.pusht_data_checks --dataset data/pusht.npz --output docs/results/pusht/data_checks.json` | `docs/results/pusht/data_checks.json` |
+| Push-T: figures and numbers | `python docs/figures/pusht_figures.py`, `python docs/figures/pusht_numbers.py` | `docs/figures/fig-pusht-*`, `docs/paper/pusht-numbers.tex` |
+| Point mass: prediction, data coverage, ablations and policy success | `scripts/run_toy.sh`, then `python -m scripts.summarize_runs --root results` | `docs/results/<experiment>/` |
+| Point mass: matched-supervision pilot | `scripts/hpc/supervision_pilot.sbatch` (Slurm), which runs `scripts/supervision_ablation.py` | [docs/results/supervision-pilot/](docs/results/supervision-pilot/README.md) |
+| Point mass: affine dynamics diagnostic | `python3 scripts/research_audit.py --seeds 5 --output docs/results/research-audit` | [docs/results/research-audit/](docs/results/research-audit/README.md) |
+| Point mass: parameter and runtime benchmark | `python docs/figures/benchmark_efficiency.py --run-dir <dir with wam.pt, vla.pt, toy.npz>` | `docs/results/efficiency/` |
+| Point mass: figures | `python docs/figures/make_figures.py` | `docs/figures/` |
 
-Each experiment in the main study changes one setting of `scripts/run_toy.sh` through an environment variable, for example:
+Each Push-T experiment is a git branch that changes one line of its parent's configuration block in `scripts/run.sh`; the [tutorial](docs/pico-wam-paper.md#reproducing-everything) lists them all. Each point-mass experiment changes one setting of `scripts/run_toy.sh` through an environment variable, for example:
 
 ```sh
 RANDOM_ACTION_PROB=0.0 bash scripts/run_toy.sh   # expert-only data
@@ -209,10 +232,10 @@ tectonic docs/paper/pico-wam-paper.tex
 ## Next steps
 
 Planning to,
-- plan with the world model: compare candidate action sequences in imagination and pick the best (MPC), and test whether better prediction leads to better decisions
 - add a history-based baseline, since a single frame cannot reveal velocity
+- learn the planner's cost instead of writing it by hand
+- replace the simulator branches with data a real robot could collect, such as play or perturbed demonstrations
 - rerun the supervision comparison with more runs and a fixed, confirmatory protocol
-- rerun the paper's study on Push-T, where the dynamics include contact and a single frame hides the agent's velocity
 - run the study on Meta-World manipulation tasks, **TBD**
 - a standalone inference script with arbitrary text input, **TBD**
-- blogs, tutorials and a video walkthrough, **TBD**
+- blogs and a video walkthrough, **TBD**
