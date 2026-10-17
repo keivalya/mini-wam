@@ -19,6 +19,7 @@ PUSHT_DATA="${PUSHT_DATA:-lerobot}"      # pusht: lerobot (human demos), expert 
 DEMOS="${DEMOS:-206}"                    # pusht: how many of LeRobot's 206 human demos to use (the first N)
 MODE="${MODE:-pipeline}"                 # pipeline, or supervision (the matched-supervision pilot)
 PLAN="${PLAN:-1}"                        # pusht: also test the WAM planning with its world model (scripts/plan.py)
+PLAN_COMPARE="${PLAN_COMPARE:-1}"        # pusht: also test the old planner, whose search starts from the last plan (warm_start)
 PARALLEL_SEEDS="${PARALLEL_SEEDS:-1}"    # 1 = run all seeds at once on the job's GPU (same results, less wall time)
 case "$ENV_NAME" in
   pusht) DEFAULT_EPISODES=200; DEFAULT_MAX_STEPS=300; DEFAULT_RANDOM_ACTION_PROB=0.1 ;;
@@ -94,7 +95,7 @@ export PYTHONUNBUFFERED=1
 
 echo "[run] host=$(hostname) python=$($PYV --version) torch=$($PYV -c 'import torch; print(torch.__version__, torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu")')"
 echo "[run] cpus: $(nproc) slurm_job=${SLURM_JOB_ID:-none}"
-echo "[run] config: ENV_NAME=$ENV_NAME PUSHT_DATA=$PUSHT_DATA DEMOS=$DEMOS MODE=$MODE PLAN=$PLAN SEEDS='$SEEDS' EPOCHS=$EPOCHS EPISODES=$EPISODES MAX_STEPS=$MAX_STEPS RANDOM_ACTION_PROB=$RANDOM_ACTION_PROB HORIZON=$HORIZON ACTION_CHUNK=$ACTION_CHUNK STATE_WEIGHT=$STATE_WEIGHT IMAGE_WEIGHT=$IMAGE_WEIGHT LATENT_WEIGHT=$LATENT_WEIGHT STATE_INPUT=$STATE_INPUT ACTION_HEAD=$ACTION_HEAD TEST_EPISODES=$TEST_EPISODES"
+echo "[run] config: ENV_NAME=$ENV_NAME PUSHT_DATA=$PUSHT_DATA DEMOS=$DEMOS MODE=$MODE PLAN=$PLAN PLAN_COMPARE=$PLAN_COMPARE SEEDS='$SEEDS' EPOCHS=$EPOCHS EPISODES=$EPISODES MAX_STEPS=$MAX_STEPS RANDOM_ACTION_PROB=$RANDOM_ACTION_PROB HORIZON=$HORIZON ACTION_CHUNK=$ACTION_CHUNK STATE_WEIGHT=$STATE_WEIGHT IMAGE_WEIGHT=$IMAGE_WEIGHT LATENT_WEIGHT=$LATENT_WEIGHT STATE_INPUT=$STATE_INPUT ACTION_HEAD=$ACTION_HEAD TEST_EPISODES=$TEST_EPISODES"
 
 STATE_FLAG=""
 [ "$STATE_INPUT" = "0" ] && STATE_FLAG="--no_state_input"
@@ -187,6 +188,11 @@ run_seed() {
   if [ "$ENV_NAME" = "pusht" ] && [ "$PLAN" = "1" ]; then
     $PYV -m scripts.test --checkpoint "$R/wam.pt" --planner mpc --episodes "$TEST_EPISODES" --seed $((10000 + 1000 * SEED)) \
       --max-steps "$MAX_STEPS" --device "$TORCH_DEVICE" --json-out "$R/wam_mpc_test.json" | tail -1
+    if [ "$PLAN_COMPARE" = "1" ]; then   # the old planner: each search starts from the last step's plan
+      $PYV -m scripts.test --checkpoint "$R/wam.pt" --planner mpc --planner-config '{"warm_start": true}' \
+        --episodes "$TEST_EPISODES" --seed $((10000 + 1000 * SEED)) \
+        --max-steps "$MAX_STEPS" --device "$TORCH_DEVICE" --json-out "$R/wam_mpc_warm_test.json" | tail -1
+    fi
   fi
 }
 for_each_seed run_seed
