@@ -1,0 +1,8 @@
+{
+  "success_rate": 0.01,
+  "episodes": 100,
+  "mean_steps": 297.8,
+  "seed": 11000,
+  "planner": "policy",
+  "mean_max_coverage": 0.2832320163167022
+}

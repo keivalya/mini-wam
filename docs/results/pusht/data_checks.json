@@ -1,0 +1,36 @@
+{
+  "dataset": "/tmp/pusht-dev/base-seed0/pusht.npz",
+  "source": "lerobot/pusht@7628202a2180972f291ba1bc6723834921e72c19 + lerobot/pusht_keypoints@ace8c161a68bc025c21a5f29f85b86a9a2c5e64b",
+  "clipped_actions": 29,
+  "transitions": 25444,
+  "replay": {
+    "block_error_px_p50": 0.0,
+    "block_error_px_p99": 0.5272856652852096,
+    "moving_block_step_px_median": 3.6542615079621,
+    "n_checked": 3635
+  },
+  "render": {
+    "mean_abs_pixel_difference": 0.949428515880812,
+    "max": 1.4307454427083333,
+    "n_frames": 509
+  },
+  "demos": {
+    "episodes": 206,
+    "best_coverage_mean": 0.8476849310220854,
+    "successes": 0
+  },
+  "expert": [
+    {
+      "random_action_prob": 0.0,
+      "episodes": 30,
+      "success_rate": 1.0,
+      "mean_steps": 117.96666666666667
+    },
+    {
+      "random_action_prob": 0.1,
+      "episodes": 30,
+      "success_rate": 0.16666666666666666,
+      "mean_steps": 280.93333333333334
+    }
+  ]
+}

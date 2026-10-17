@@ -1,0 +1,56 @@
+[run] ===== seed 2 =====
+  vocab size:   8
+  expert frac:  1.00
+  successes:    167/200
+            val:   loss=0.0147 action=0.0102 s_rec=0.0019 s_pred=0.0033 img_rec=0.0006 img_pred=0.0006 latent=0.0007
+Epoch 15/15 train: loss=0.0132 action=0.0104 s_rec=0.0013 s_pred=0.0018 img_rec=0.0003 img_pred=0.0003 latent=0.0005
+            val:   loss=0.0138 action=0.0103 s_rec=0.0015 s_pred=0.0021 img_rec=0.0005 img_pred=0.0005 latent=0.0006
+Epoch 15/15 train: loss=0.0098 action=0.0098
+            val:   loss=0.0100 action=0.0100
+Held-out episodes: 20
+  k      n  state nMSE     copy  image MSE     copy
+  0   4402      0.0014   0.0000    0.00051  0.00000
+  1   4382      0.0010   0.1377    0.00051  0.00025
+  2   4362      0.0014   0.2042    0.00052  0.00051
+  3   4342      0.0020   0.2529    0.00053  0.00066
+  4   4322      0.0027   0.3043    0.00053  0.00078
+  5   4302      0.0035   0.3496    0.00054  0.00088
+  6   4282      0.0044   0.3955    0.00055  0.00096
+  7   4262      0.0053   0.4410    0.00057  0.00104
+  8   4242      0.0063   0.4844    0.00058  0.00111
+  9   4222      0.0073   0.5224    0.00059  0.00118
+ 10   4202      0.0084   0.5542    0.00060  0.00125
+ 11   4182      0.0094   0.5872    0.00062  0.00131
+ 12   4162      0.0105   0.6176    0.00063  0.00138
+ 13   4142      0.0117   0.6439    0.00065  0.00144
+ 14   4122      0.0128   0.6693    0.00067  0.00150
+ 15   4102      0.0139   0.6923    0.00068  0.00156
+
+State readout R^2 (k=0: from the real latent, k>0: from the imagined latent)
+      variable     k=0     k=1     k=5    k=10    k=15
+       agent_x   0.999   0.999   0.998   0.995   0.991
+       agent_y   0.999   0.999   0.996   0.991   0.985
+      agent_vx   0.993   0.999   0.998   0.998   0.998
+      agent_vy   0.999   0.999   0.999   0.999   0.999
+       block_x   0.998   0.997   0.983   0.955   0.922
+       block_y   0.999   0.999   0.990   0.969   0.940
+     block_cos   0.999   0.999   0.997   0.990   0.980
+     block_sin   0.999   0.999   0.998   0.995   0.991
+
+Counterfactual imagination (884 starts x 8 random plans)
+  k  WAM nMSE    no-op
+  1    0.0022   0.5084
+  2    0.0036   0.5159
+  3    0.0048   0.5217
+  4    0.0061   0.5254
+  5    0.0076   0.5388
+  6    0.0092   0.5397
+  7    0.0109   0.5477
+  8    0.0126   0.5483
+  9    0.0144   0.5610
+ 10    0.0163   0.5703
+
+Saved: results/pusht/seed2/wam_eval.json
+[test] Success rate: 0/100 = 0% | mean steps: 300.0 | mean max coverage: 0.114
+[test] Success rate: 0/100 = 0% | mean steps: 300.0 | mean max coverage: 0.105
+[test] Success rate: 0/100 = 0% | mean steps: 300.0 | mean max coverage: 0.242

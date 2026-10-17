@@ -1,0 +1,317 @@
+[
+  {
+    "epoch": 1,
+    "train": {
+      "action_loss": 0.008079873467002532,
+      "state_recon_loss": 0.06045384485144287,
+      "state_pred_loss": 0.11043069021096225,
+      "image_recon_loss": 0.0020759465345870924,
+      "image_pred_loss": 0.002075135066925965,
+      "latent_loss": 0.14129154795170046,
+      "total_loss": 0.0976732234253153
+    },
+    "val": {
+      "action_loss": 0.005042619936598035,
+      "state_recon_loss": 0.007502804700141916,
+      "state_pred_loss": 0.012038175427856354,
+      "image_recon_loss": 0.0018119657858131596,
+      "image_pred_loss": 0.0018323275085108785,
+      "latent_loss": 0.11618336560634467,
+      "total_loss": 0.018457403449484936
+    }
+  },
+  {
+    "epoch": 2,
+    "train": {
+      "action_loss": 0.004960978095911166,
+      "state_recon_loss": 0.005484011965371553,
+      "state_pred_loss": 0.008159422042773702,
+      "image_recon_loss": 0.0014352012010753073,
+      "image_pred_loss": 0.001465255445881081,
+      "latent_loss": 0.09686729013649147,
+      "total_loss": 0.014683151750619794
+    },
+    "val": {
+      "action_loss": 0.004797894969725838,
+      "state_recon_loss": 0.005132254027904799,
+      "state_pred_loss": 0.008029008713335945,
+      "image_recon_loss": 0.001556603906926914,
+      "image_pred_loss": 0.0015776761411689221,
+      "latent_loss": 0.08144968271255493,
+      "total_loss": 0.01451280632414497
+    }
+  },
+  {
+    "epoch": 3,
+    "train": {
+      "action_loss": 0.004756323583489648,
+      "state_recon_loss": 0.003937824310347451,
+      "state_pred_loss": 0.0062522274019919015,
+      "image_recon_loss": 0.0012155359756407902,
+      "image_pred_loss": 0.0012550133666815364,
+      "latent_loss": 0.07677104867094761,
+      "total_loss": 0.01232189885175683
+    },
+    "val": {
+      "action_loss": 0.004644552896945523,
+      "state_recon_loss": 0.006162096456123086,
+      "state_pred_loss": 0.00961049360724596,
+      "image_recon_loss": 0.0013879978941538586,
+      "image_pred_loss": 0.0014681687166627783,
+      "latent_loss": 0.07114841799323375,
+      "total_loss": 0.015387014503089281
+    }
+  },
+  {
+    "epoch": 4,
+    "train": {
+      "action_loss": 0.004619918971937437,
+      "state_recon_loss": 0.003297609488118599,
+      "state_pred_loss": 0.005581183189257208,
+      "image_recon_loss": 0.0011012524584617862,
+      "image_pred_loss": 0.0011496914531841035,
+      "latent_loss": 0.0662539052107895,
+      "total_loss": 0.011310259230455196
+    },
+    "val": {
+      "action_loss": 0.004354998772748961,
+      "state_recon_loss": 0.0037553184669321545,
+      "state_pred_loss": 0.005167900716814284,
+      "image_recon_loss": 0.0013618896949964647,
+      "image_pred_loss": 0.0013926469575828659,
+      "latent_loss": 0.062266285969660835,
+      "total_loss": 0.011571145086334302
+    }
+  },
+  {
+    "epoch": 5,
+    "train": {
+      "action_loss": 0.004513229651682817,
+      "state_recon_loss": 0.0027047026026943235,
+      "state_pred_loss": 0.004367260949315671,
+      "image_recon_loss": 0.0010039265000567578,
+      "image_pred_loss": 0.0010498594226324921,
+      "latent_loss": 0.059334407118804666,
+      "total_loss": 0.010102997362600143
+    },
+    "val": {
+      "action_loss": 0.005721916409495932,
+      "state_recon_loss": 0.0034102302281042705,
+      "state_pred_loss": 0.00814782344091397,
+      "image_recon_loss": 0.0013490462489426135,
+      "image_pred_loss": 0.0013508678236618065,
+      "latent_loss": 0.05534490207066903,
+      "total_loss": 0.014200857379115545
+    }
+  },
+  {
+    "epoch": 6,
+    "train": {
+      "action_loss": 0.004519145761774709,
+      "state_recon_loss": 0.002536058078920105,
+      "state_pred_loss": 0.003978936963729039,
+      "image_recon_loss": 0.000938310417884641,
+      "image_pred_loss": 0.0009847082090872821,
+      "latent_loss": 0.05207344394491869,
+      "total_loss": 0.00969966188120528
+    },
+    "val": {
+      "action_loss": 0.00446880932073467,
+      "state_recon_loss": 0.005167204241196696,
+      "state_pred_loss": 0.007632850637802711,
+      "image_recon_loss": 0.001403576774845043,
+      "image_pred_loss": 0.0015091763723355074,
+      "latent_loss": 0.04969849255222541,
+      "total_loss": 0.013781589928727883
+    }
+  },
+  {
+    "epoch": 7,
+    "train": {
+      "action_loss": 0.004426017921893975,
+      "state_recon_loss": 0.0022015001139705907,
+      "state_pred_loss": 0.0034680242858933694,
+      "image_recon_loss": 0.0009010265577397564,
+      "image_pred_loss": 0.0009480473926002422,
+      "latent_loss": 0.046240684624886536,
+      "total_loss": 0.00910985408821139
+    },
+    "val": {
+      "action_loss": 0.0040376233323835406,
+      "state_recon_loss": 0.0032011078312419927,
+      "state_pred_loss": 0.004934182200724116,
+      "image_recon_loss": 0.0012919637482040204,
+      "image_pred_loss": 0.0013480076706036926,
+      "latent_loss": 0.04171764094095964,
+      "total_loss": 0.01074523978221875
+    }
+  },
+  {
+    "epoch": 8,
+    "train": {
+      "action_loss": 0.004345897547680746,
+      "state_recon_loss": 0.0018823741634480392,
+      "state_pred_loss": 0.0030817661371181884,
+      "image_recon_loss": 0.0008555591502078858,
+      "image_pred_loss": 0.0008957803403945144,
+      "latent_loss": 0.04139176752421663,
+      "total_loss": 0.008579307188576834
+    },
+    "val": {
+      "action_loss": 0.004249788597226143,
+      "state_recon_loss": 0.0024751345216869735,
+      "state_pred_loss": 0.0035421725115380607,
+      "image_recon_loss": 0.0011649806559300767,
+      "image_pred_loss": 0.0011886675829569308,
+      "latent_loss": 0.039919746667146684,
+      "total_loss": 0.00961209031753242
+    }
+  },
+  {
+    "epoch": 9,
+    "train": {
+      "action_loss": 0.004343797372896004,
+      "state_recon_loss": 0.0019558284865002014,
+      "state_pred_loss": 0.002820340363409448,
+      "image_recon_loss": 0.0008297601388006062,
+      "image_pred_loss": 0.0008687636874752334,
+      "latent_loss": 0.03771942192916974,
+      "total_loss": 0.008430405621747608
+    },
+    "val": {
+      "action_loss": 0.004048860025090667,
+      "state_recon_loss": 0.0021065125743357036,
+      "state_pred_loss": 0.003028690831270069,
+      "image_recon_loss": 0.001186595680550314,
+      "image_pred_loss": 0.0012069699712670765,
+      "latent_loss": 0.0342124483275872,
+      "total_loss": 0.009010027397710544
+    }
+  },
+  {
+    "epoch": 10,
+    "train": {
+      "action_loss": 0.0042943644026915235,
+      "state_recon_loss": 0.001701071710269949,
+      "state_pred_loss": 0.0025219886142254675,
+      "image_recon_loss": 0.0007981449886999997,
+      "image_pred_loss": 0.0008321040193021608,
+      "latent_loss": 0.034587491679594906,
+      "total_loss": 0.008036143579380714
+    },
+    "val": {
+      "action_loss": 0.005377968398925776,
+      "state_recon_loss": 0.0033429858579228705,
+      "state_pred_loss": 0.0034145546432297964,
+      "image_recon_loss": 0.0011641619984920208,
+      "image_pred_loss": 0.001179188304903129,
+      "latent_loss": 0.03231061208133514,
+      "total_loss": 0.011100089082207817
+    }
+  },
+  {
+    "epoch": 11,
+    "train": {
+      "action_loss": 0.0043482525870931436,
+      "state_recon_loss": 0.001887510073458781,
+      "state_pred_loss": 0.0023430091955721865,
+      "image_recon_loss": 0.0007733494986303753,
+      "image_pred_loss": 0.0008045444805001659,
+      "latent_loss": 0.03251366214107698,
+      "total_loss": 0.008041406203599328
+    },
+    "val": {
+      "action_loss": 0.004371828496671067,
+      "state_recon_loss": 0.0026026971645366687,
+      "state_pred_loss": 0.003091970865184871,
+      "image_recon_loss": 0.0011558899792054524,
+      "image_pred_loss": 0.0011768927966029597,
+      "latent_loss": 0.030601326983708602,
+      "total_loss": 0.009551945271400304
+    }
+  },
+  {
+    "epoch": 12,
+    "train": {
+      "action_loss": 0.004215865995697711,
+      "state_recon_loss": 0.001542676966463966,
+      "state_pred_loss": 0.002177718566175716,
+      "image_recon_loss": 0.0007361019171476634,
+      "image_pred_loss": 0.0007647785845150888,
+      "latent_loss": 0.030421932026419067,
+      "total_loss": 0.007576944272995645
+    },
+    "val": {
+      "action_loss": 0.005468505615225205,
+      "state_recon_loss": 0.005953204670491127,
+      "state_pred_loss": 0.0035099218477709936,
+      "image_recon_loss": 0.0011562116503214034,
+      "image_pred_loss": 0.0011555605399637269,
+      "latent_loss": 0.02860658206618749,
+      "total_loss": 0.012511841078790335
+    }
+  },
+  {
+    "epoch": 13,
+    "train": {
+      "action_loss": 0.004276530682485716,
+      "state_recon_loss": 0.0015881789999199418,
+      "state_pred_loss": 0.0020753935491623905,
+      "image_recon_loss": 0.0007144792223658809,
+      "image_pred_loss": 0.0007425741556981963,
+      "latent_loss": 0.02900157310643811,
+      "total_loss": 0.007565370349925719
+    },
+    "val": {
+      "action_loss": 0.004334640945307911,
+      "state_recon_loss": 0.002949840074333434,
+      "state_pred_loss": 0.004239646885544061,
+      "image_recon_loss": 0.0011732790438243404,
+      "image_pred_loss": 0.0012251388455311266,
+      "latent_loss": 0.02608162777355084,
+      "total_loss": 0.010327802372093384
+    }
+  },
+  {
+    "epoch": 14,
+    "train": {
+      "action_loss": 0.004199161058521028,
+      "state_recon_loss": 0.001419471479321303,
+      "state_pred_loss": 0.001989520038435782,
+      "image_recon_loss": 0.0006841099008555769,
+      "image_pred_loss": 0.0007105606319063464,
+      "latent_loss": 0.02726068436307706,
+      "total_loss": 0.007298327334813916
+    },
+    "val": {
+      "action_loss": 0.004068012399097475,
+      "state_recon_loss": 0.0022025635722093284,
+      "state_pred_loss": 0.0025668954351343786,
+      "image_recon_loss": 0.0010766609930970635,
+      "image_pred_loss": 0.0010797771519551484,
+      "latent_loss": 0.025633027817194277,
+      "total_loss": 0.008609180075044815
+    }
+  },
+  {
+    "epoch": 15,
+    "train": {
+      "action_loss": 0.004169734396196083,
+      "state_recon_loss": 0.001344893510528687,
+      "state_pred_loss": 0.0017436818665504238,
+      "image_recon_loss": 0.0006443358552375712,
+      "image_pred_loss": 0.0006650357650124302,
+      "latent_loss": 0.026203812516677607,
+      "total_loss": 0.007023393718033461
+    },
+    "val": {
+      "action_loss": 0.004396849679402434,
+      "state_recon_loss": 0.003123267822039242,
+      "state_pred_loss": 0.002719015579742308,
+      "image_recon_loss": 0.0010819954509273745,
+      "image_pred_loss": 0.001088273166678846,
+      "latent_loss": 0.024384412335661743,
+      "total_loss": 0.009488259980884883
+    }
+  }
+]

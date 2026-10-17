@@ -1,0 +1,8 @@
+{
+  "success_rate": 0.01,
+  "episodes": 100,
+  "mean_steps": 298.25,
+  "seed": 12000,
+  "planner": "mpc",
+  "mean_max_coverage": 0.4300715868848811
+}
