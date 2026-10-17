@@ -431,6 +431,9 @@ def main():
         # save every epoch, so an interrupted run still leaves a usable checkpoint
         save_checkpoint(model, full, train_eps, val_eps, horizon, args, history)
 
+    n_params = sum(p.numel() for p in model.parameters())
+    n_policy = sum(p.numel() for p in model.policy_head.parameters())
+    print(f"Model: {args.model_type}, {n_params:,} parameters ({n_policy:,} in the {args.action_head} policy head)")
     print("Saved checkpoint:", args.save_path)
 
 
