@@ -36,7 +36,8 @@ IMAGE_WEIGHT="${IMAGE_WEIGHT:-1.0}"
 LATENT_WEIGHT="${LATENT_WEIGHT:-1.0}"
 STATE_INPUT="${STATE_INPUT:-1}"          # 0 = image + language only (no state_t input)
 ACTION_HEAD="${ACTION_HEAD:-mlp}"
-ACTION_CHUNK="${ACTION_CHUNK:-8}"        # predict the next K actions at once and execute K/2 (1 = one action per step)
+ACTION_CHUNK="${ACTION_CHUNK:-16}"       # predict the next K actions at once and execute K/2 (1 = one action per step);
+                                         # 16, executing 8, is Diffusion Policy's Push-T setting
 TEST_EPISODES="${TEST_EPISODES:-100}"
 DEVICE="${DEVICE:-auto}"
 OUT="${OUT:-results/$ENV_NAME}"
