@@ -4,4 +4,8 @@
 # Every setting of scripts/run.sh can still be changed, e.g.
 #   RANDOM_ACTION_PROB=0.0 bash scripts/run_toy.sh
 set -euo pipefail
-ENV_NAME=toy OUT="${OUT:-results}" VIS_DIR="${VIS_DIR:-outputs/wam}" exec bash "$(dirname "$0")/run.sh"
+# The point-mass study predates the Push-T defaults, so pin its own settings
+# (one action per step, 15 epochs, image decoder on) unless you override them.
+ENV_NAME=toy OUT="${OUT:-results}" VIS_DIR="${VIS_DIR:-outputs/wam}" \
+  ACTION_CHUNK="${ACTION_CHUNK:-1}" EPOCHS="${EPOCHS:-15}" PREDICT_IMAGE="${PREDICT_IMAGE:-1}" \
+  exec bash "$(dirname "$0")/run.sh"
