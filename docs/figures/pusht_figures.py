@@ -222,6 +222,8 @@ def fig_data(exps):
     ax.set_xticks(x)
     ax.set_xticklabels([l for _, l in present], fontsize=6)
     ax.set_yscale("log")
+    ax.set_yticks([0.01, 0.02, 0.05], ["0.01", "0.02", "0.05"])
+    ax.yaxis.set_minor_formatter(plt.NullFormatter())
     ax.set_ylabel("block error at 10 steps, nMSE")
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.36), ncol=1, fontsize=6)
 
@@ -245,7 +247,7 @@ def fig_data(exps):
 
 
 PLANNERS = [("wam_test", "policy\nonly"), ("wam_mpc_test", "plan\ndefault"), ("wam_mpc_wide_test", "plan\nwider noise"),
-            ("wam_mpc_cem_test", "plan\n3 CEM rounds"), ("wam_mpc_noprior_test", "plan\nno policy prior")]
+            ("wam_mpc_cem_test", "plan\n3 rounds"), ("wam_mpc_noprior_test", "plan\nno prior")]
 
 
 def fig_planning(budget, base):
@@ -283,27 +285,35 @@ def fig_planning(budget, base):
 # --------------------------------------------------------------- ablations
 
 
+# two groups of one-change variants: on the study base, and on the action-chunk model
 VARIANTS = [("baseline", "full objective, $H=5$"), ("no-latent", "no latent consistency"), ("no-image", "no image loss"),
             ("horizon-1", "horizon $H=1$"), ("horizon-10", "horizon $H=10$"), ("pixel-input", "pixel input"),
             ("demos-100", "100 demonstrations"), ("demos-50", "50 demonstrations"), ("wider-model", "latent width 256"),
-            ("epochs-100", "100 epochs"), ("diffusion-head", "diffusion head"), ("action-chunks", "action chunks, $K=8$")]
+            ("epochs-100", "100 epochs"), ("diffusion-head", "diffusion head")]
+CHUNK_VARIANTS = [("action-chunks", "action chunks, $K=8$"), ("chunks-k16", "chunks $K=16$, execute 8"),
+                  ("chunks-temporal-ensembling", "average overlapping chunks"), ("chunks-dmodel-64", "latent width 64"),
+                  ("chunks-plain-cnn", "plain CNN encoder"), ("chunks-no-decoder", "no image decoder")]
 
 
 def fig_ablations(exps):
-    present = [(n, l) for n, l in VARIANTS if n in exps]
+    groups = [[(n, l) for n, l in g if n in exps] for g in (VARIANTS, CHUNK_VARIANTS)]
+    present = groups[0] + groups[1]
+    refs = {n: g[0][0] for g in groups for n, _ in g}   # each row's reference: the first row of its group
     metrics = [
         ("state nMSE, $k=15$", lambda s: s["wam_eval"]["state_nmse"][15], WAM),
         ("block counterfactual\nnMSE, $k=10$", block_cf, WAM),
         ("best coverage, %", None, None),
     ]
-    fig, axes = fs.figure_grid(1, 3, width=W, ratio=0.5, sharey=True)
-    y = np.arange(len(present))[::-1]
+    fig, axes = fs.figure_grid(1, 3, width=W, ratio=0.64, sharey=True)
+    n0, n1 = len(groups[0]), len(groups[1])
+    y = np.concatenate([n1 + 0.6 + np.arange(n0)[::-1], np.arange(n1)[::-1]])   # a gap between the groups
     for ax, (label, getter, color) in zip(axes, metrics):
+        ax.axhline(n1 - 0.2, color=REF, lw=0.5)
         for yi, (name, _) in zip(y, present):
             s = exps[name]
             if getter is not None:
                 v = per_seed(s, getter)
-                c = REF if name == "baseline" else color
+                c = REF if refs[name] == name else color
                 ax.errorbar(v.mean(), yi, xerr=v.std(), color=c, marker="o", ms=3, capsize=2, lw=1.0)
                 ax.scatter(v, np.full(len(v), yi), s=5, color=c, alpha=0.5, lw=0, zorder=3)
             else:
@@ -311,8 +321,14 @@ def fig_ablations(exps):
                     if all(key in r for r in s):
                         v = coverage(s, key)
                         ax.errorbar(v.mean(), yi + off, xerr=v.std(), color=c, marker=m, ms=2.8, capsize=1.5, lw=0.9)
+        if getter is not None:   # each group's reference value, over that group's rows only
+            for g, (lo, hi) in zip(groups, [(n1 - 0.2, y[0] + 0.5), (-0.5, n1 - 0.2)]):
+                ax.plot([per_seed(exps[g[0][0]], getter).mean()] * 2, [lo, hi], color=REF, lw=0.6, ls=":")
         if getter is not None:
-            ax.axvline(per_seed(exps["baseline"], getter).mean(), color=REF, lw=0.6, ls=":")
+            ax.set_xscale("log")   # the pixel-input row is several times worse than the rest
+            ticks = [0.01, 0.03, 0.1]
+            ax.set_xticks(ticks, [f"{t:g}" for t in ticks])
+            ax.xaxis.set_minor_formatter(plt.NullFormatter())
         ax.set_xlabel(label)
         ax.set_yticks(y)
         ax.grid(axis="y", visible=False)
@@ -322,9 +338,56 @@ def fig_ablations(exps):
     axes[2].set_xlim(0, 100)
     axes[2].legend([Line2D([], [], color=VLA, marker="s", ls="none", ms=3), Line2D([], [], color=WAM, marker="o", ls="none", ms=3),
                     Line2D([], [], color=PLAN, marker="D", ls="none", ms=3)], ["VLA", "WAM, reactive", "WAM, planning"],
-                   loc="upper center", bbox_to_anchor=(0.5, -0.22), ncol=3, fontsize=5.5)
+                   loc="upper center", bbox_to_anchor=(0.5, -0.17), ncol=3, fontsize=5.5)
     fs.panel_labels(axes)
     finish(fig, "fig-pusht-ablations")
+
+
+# ------------------------------------------------- what makes Push-T succeed
+
+
+RECIPE = [("baseline", "study base,\none action per step"), ("action-chunks", "action chunks, $K=8$"),
+          ("chunks-epochs-100", "chunks, 100 epochs"), ("chunks-branched", "chunks, branched data"),
+          ("chunks-restart-planner", "chunks, restarting planner"),
+          ("branched-restart-planner", "chunks, branched data,\nrestarting planner"),
+          ("final", "all three, 100 epochs")]
+POLICIES = [("vla_test", VLA, "s", 0.22, "VLA"), ("wam_test", WAM, "o", 0.0, "WAM, reactive"),
+            ("wam_mpc_test", PLAN, "D", -0.22, "WAM, planning")]
+
+
+def fig_recipe(exps):
+    """The changes that make Push-T succeed: coverage, successes and the block's counterfactual error."""
+    present = [(n, l) for n, l in RECIPE if n in exps]
+    fig, axes = fs.figure_grid(1, 3, width=W, ratio=0.5, sharey=True)
+    y = np.arange(len(present))[::-1]
+    for yi, (name, _) in zip(y, present):
+        s = exps[name]
+        for key, c, m, off, _ in POLICIES:
+            for ax, v in [(axes[0], coverage(s, key)), (axes[1], per_seed(s, lambda r: 100 * r[key]["success_rate"]))]:
+                ax.errorbar(v.mean(), yi + off, xerr=v.std(), color=c, marker=m, ms=2.8, capsize=1.5, lw=0.9)
+                ax.scatter(v, np.full(len(v), yi + off), s=4, color=c, alpha=0.45, lw=0, zorder=3)
+        v = per_seed(s, block_cf)
+        axes[2].errorbar(v.mean(), yi, xerr=v.std(), color=WAM, marker="o", ms=3, capsize=2, lw=1.0)
+        axes[2].scatter(v, np.full(len(v), yi), s=5, color=WAM, alpha=0.5, lw=0, zorder=3)
+    noop = per_seed(exps["baseline"], lambda r: block_cf(r, key="noop_nmse_per_dim")).mean()
+    axes[2].axvline(noop, color=REF, lw=0.8, ls="--")
+    axes[2].text(noop, y[0] + 0.55, "block stays put", color=REF, fontsize=5.5, ha="left", va="bottom")
+    axes[0].set_xlim(0, 100)
+    top = max(100 * r[k]["success_rate"] for n, _ in present for r in exps[n] for k, *_ in POLICIES)
+    axes[1].set_xlim(-2, max(30, 1.15 * top))
+    axes[2].set_xlim(0, None)
+    for ax, label in zip(axes, ["best coverage, %", "success rate, %", "block counterfactual\nnMSE, $k=10$"]):
+        ax.set_xlabel(label)
+        ax.set_yticks(y)
+        ax.grid(axis="y", visible=False)
+        ax.grid(axis="x", visible=True)
+    axes[0].set_yticklabels([l for _, l in present], fontsize=6.5)
+    axes[0].set_ylabel("configuration")
+    axes[0].set_ylim(y[-1] - 0.6, y[0] + 1.0)
+    axes[1].legend([Line2D([], [], color=c, marker=m, ls="none", ms=3) for _, c, m, _, _ in POLICIES],
+                   [l for *_, l in POLICIES], loc="upper center", bbox_to_anchor=(0.5, -0.24), ncol=3, fontsize=5.5)
+    fs.panel_labels(axes)
+    finish(fig, "fig-pusht-recipe")
 
 
 # --------------------------------------------------------------- pilot
@@ -576,6 +639,7 @@ def main():
     if "planner-budget" in exps:
         fig_planning(exps["planner-budget"], exps["baseline"])
     fig_ablations(exps)
+    fig_recipe(exps)
     fig_episode_strip()
     fig_beliefs()
     fig_what_if()
