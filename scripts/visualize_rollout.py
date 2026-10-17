@@ -1,6 +1,6 @@
 """Look inside the WAM's head: what does its latent world model believe?
 
-Writes a set of figures for one held-out episode (and the whole held-out set):
+Writes a set of figures for one unseen episode (and the whole unseen set):
 
     1_imagination.png   real frames vs. what the WAM reconstructs, imagines
                         (open-loop, real actions) and dreams (its own policy
@@ -66,7 +66,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", type=str, default="checkpoints/model.pt")
     parser.add_argument("--dataset-path", type=str, default=None)
-    parser.add_argument("--episode", type=int, default=None, help="Held-out episode id (default: first)")
+    parser.add_argument("--episode", type=int, default=None, help="Unseen episode id (default: first)")
     parser.add_argument("--horizon", type=int, default=None, help="Imagination horizon (default: episode length)")
     parser.add_argument("--frames", type=int, default=8, help="Columns in the imagination strip")
     parser.add_argument("--eval-horizon", type=int, default=15)
@@ -154,9 +154,9 @@ def plot_beliefs(model, ep, z_real, imag, dream, labels, out_dir):
     for i, j in enumerate(show):
         ax = axes.flat[i]
         ax.plot(true[:, j], color=C_TRUE, lw=1.6, label="true")
-        ax.plot(now[:, j], color=C_RECON, lw=1.2, label="read from z_t (now)")
-        ax.plot(np.arange(len(im)), im[:, j], color=C_IMAG, lw=1.2, ls="--", label="imagined from t=0 (real actions)")
-        ax.plot(np.arange(len(dr)), dr[:, j], color=C_DREAM, lw=1.2, ls=":", label="dreamed from t=0 (own policy)")
+        ax.plot(now[:, j], color=C_RECON, lw=1.2, label="read from z_t, now")
+        ax.plot(np.arange(len(im)), im[:, j], color=C_IMAG, lw=1.2, ls="--", label="imagined from t=0, real actions")
+        ax.plot(np.arange(len(dr)), dr[:, j], color=C_DREAM, lw=1.2, ls=":", label="dreamed from t=0, own policy")
         ax.set_ylabel(labels[j])
     for ax in axes.flat[len(show):]:
         ax.axis("off")
@@ -197,7 +197,7 @@ def plot_latent_map(model, data, episodes, ep, z_real, imag, labels, out_dir):
 
     xy = proj(Z)
     sc = ax.scatter(xy[:, 0], xy[:, 1], c=P, cmap="viridis", s=4, alpha=0.5, linewidths=0)
-    fig.colorbar(sc, ax=ax, label="episode progress (0 = start, 1 = end)", fraction=0.046)
+    fig.colorbar(sc, ax=ax, label="episode progress, 0 = start, 1 = end", fraction=0.046)
 
     real_xy = proj(z_real.cpu().numpy())
     imag_xy = proj(imag["z"][0].cpu().numpy())
@@ -205,10 +205,10 @@ def plot_latent_map(model, data, episodes, ep, z_real, imag, labels, out_dir):
     ax.plot(imag_xy[:, 0], imag_xy[:, 1], color=C_IMAG, lw=1.6, ls="--", label="imagined from t=0")
     ax.scatter(*real_xy[0], color=C_TRUE, s=30, zorder=5, marker="o")
     ax.scatter(*real_xy[-1], color=C_TRUE, s=40, zorder=5, marker="*")
-    ax.set_xlabel(f"PC1 ({explained[0]:.0%} of variance)")
-    ax.set_ylabel(f"PC2 ({explained[1]:.0%} of variance)")
+    ax.set_xlabel(f"PC1, {explained[0]:.0%} of variance")
+    ax.set_ylabel(f"PC2, {explained[1]:.0%} of variance")
     ax.legend(loc="best", fontsize=8)
-    ax.set_title("Latent space (held-out episodes)")
+    ax.set_title("Latent space of unseen episodes")
 
     im = ax2.imshow(corr, cmap="RdBu_r", vmin=-1, vmax=1, aspect="auto")
     ax2.set_xticks(range(len(moving)))
@@ -328,10 +328,10 @@ def plot_horizon(results, labels, out_dir):
             ax.plot(k, np.clip(r2[:, j], -0.2, 1), color=cmap(i), lw=1.2, label=labels[j])
         ax.set_ylim(-0.2, 1.02)
         ax.set_xlabel("imagined steps k")
-        ax.set_ylabel("readout R² (1 = perfect)")
+        ax.set_ylabel("readout R², 1 = perfect")
         ax.legend(fontsize=6, ncol=2)
 
-    fig.suptitle(f"Imagination quality on {len(results['episodes'])} held-out episodes", y=1.03)
+    fig.suptitle(f"Imagination quality on {len(results['episodes'])} unseen episodes", y=1.03)
     fig.tight_layout()
     save(fig, out_dir, "5_horizon.png")
 
@@ -359,7 +359,7 @@ def plot_keypoints(model, ep, n_frames, out_dir):
         ax.scatter(px, py, c=[cmap(i % 20) for i in range(K)], s=10, marker="x", linewidths=1)
         ax.set_xticks([]); ax.set_yticks([])
         ax.set_title(f"t = {t}")
-    fig.suptitle(f"{K} spatial-softmax keypoints (one color per keypoint)", y=1.08)
+    fig.suptitle(f"{K} spatial-softmax keypoints, one color per keypoint", y=1.08)
     save(fig, out_dir, "6_keypoints.png")
 
 

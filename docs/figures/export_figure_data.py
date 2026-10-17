@@ -12,7 +12,7 @@ traced back to a model output.
 Episode views, what-if pushes and the latent map come from seed 0; keypoint
 tracking scores and what-if errors cover every seed. Keypoint scores of
 several runs (e.g. baseline and pixel-input) collect in one keypoint_stats.json.
-Everything is computed on held-out episodes (the checkpoint's val_episodes).
+Everything is computed on unseen episodes (the checkpoint's val_episodes).
 """
 
 import argparse
@@ -55,7 +55,7 @@ def positions(states, env_name):
 
 @torch.no_grad()
 def export_episode_views(model, ckpt, data):
-    """Imagination strip and belief traces for the first held-out episode."""
+    """Imagination strip and belief traces for the first unseen episode."""
     episode = ckpt["val_episodes"][0]
     ep = get_episode(data, episode)
     T = ep["actions"].shape[0]
@@ -129,7 +129,7 @@ def export_what_if(models, env_name):
         example["final_frames"] = to_uint8(out["image"][:, -1])
 
     # endpoint error (Euclidean distance after the push, unit square) for every
-    # held-out episode start of every seed: the agent, and on Push-T the block
+    # unseen episode start of every seed: the agent, and on Push-T the block
     tracked = list(positions(np.zeros((1, 8)), env_name))
     errors = {k: np.zeros((len(models), len(plans))) for k in tracked}
     ignore = {k: np.zeros((len(models), len(plans))) for k in tracked}  # reference: the no-op endpoint for every push
@@ -159,7 +159,7 @@ def export_what_if(models, env_name):
 
 @torch.no_grad()
 def export_latent_map(model, ckpt, data):
-    """PCA of held-out latents (seed 0) and correlation of components with state variables."""
+    """PCA of unseen latents (seed 0) and correlation of components with state variables."""
     zs, ss, prog = [], [], []
     for e in ckpt["val_episodes"]:
         ep = get_episode(data, e)
@@ -198,7 +198,7 @@ def keypoint_stats(model, ckpt, data, env_name):
     How well do the spatial-softmax keypoints track the agent (and on Push-T the block)?
 
     For each keypoint, the squared correlation between its x (y) coordinate and
-    the object's x (y) position over all held-out frames; the score is the best
+    the object's x (y) position over all unseen frames; the score is the best
     keypoint's mean of the two. Also returns the keypoints' mean spatial spread.
     """
     kps, states = [], []

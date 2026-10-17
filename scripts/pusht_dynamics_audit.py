@@ -8,10 +8,10 @@ same 8-dim state the WAM reads out:
     state + action    s_t+1 - s_t = W [s_t, a_t] + b
 
 and scores them exactly as scripts/evaluate.py scores the WAM, on the same
-held-out episodes and the same random action plans:
+unseen episodes and the same random action plans:
 
     factual          roll out k = 1..15 steps with the recorded actions
-    counterfactual   from every 5th held-out state, 8 random action plans of
+    counterfactual   from every 5th unseen state, 8 random action plans of
                      10 steps, checked against the simulator
 
 Errors are normalized MSE with the training-set standard deviations, so they

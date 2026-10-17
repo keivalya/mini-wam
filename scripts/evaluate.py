@@ -1,4 +1,4 @@
-"""Offline evaluation of a trained pico-WAM world model on held-out episodes.
+"""Offline evaluation of a trained pico-WAM world model on unseen episodes.
 
 Questions this answers (all on episodes the model never trained on):
 
@@ -132,7 +132,7 @@ def r2_per_dim(pred, true):
 @torch.no_grad()
 def evaluate(model, data, episodes, max_horizon=15):
     """
-    Collect, for every held-out (start t, step k) pair:
+    Collect, for every unseen (start t, step k) pair:
         true state s_t+k, imagined readout, copy baseline s_t
         image MSE of the imagined decode and of the copy baseline image_t
     """
@@ -217,7 +217,7 @@ def make_simulator(env_name):
 @torch.no_grad()
 def evaluate_counterfactuals(model, data, episodes, env_name="toy", horizon=10, n_plans=8, every=5, seed=0):
     """
-    For starts every `every` steps of each held-out episode, draw `n_plans`
+    For starts every `every` steps of each unseen episode, draw `n_plans`
     random action sequences, imagine with each, and compare the imagined
     state with the true simulator.
 
@@ -290,7 +290,7 @@ def main():
     results["checkpoint"] = args.checkpoint
 
     labels = ckpt["state_labels"]
-    print(f"Held-out episodes: {len(episodes)}")
+    print(f"Unseen episodes: {len(episodes)}")
     print(f"{'k':>3} {'n':>6} {'state nMSE':>11} {'copy':>8} {'image MSE':>10} {'copy':>8}")
     for i, k in enumerate(results["horizon"]):
         s = results["state_nmse"][i] if results["state_nmse"] else float("nan")

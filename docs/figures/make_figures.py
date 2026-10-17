@@ -287,7 +287,7 @@ def fig_what_if():
                bbox={"boxstyle": "square,pad=0.15", "fc": "white", "ec": "none", "alpha": 0.8})
         frame_axes.append(a)
 
-    # (c) endpoint error per push direction, all held-out episodes of all seeds
+    # (c) endpoint error per push direction, all unseen episodes of all seeds
     ax_c = fig.add_subplot(gs[2])
     err, ign = d["endpoint_error"], d["ignore_push_error"]  # (seeds, directions)
     x = np.arange(len(names))

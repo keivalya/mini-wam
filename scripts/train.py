@@ -216,7 +216,7 @@ def parse_args():
     parser.add_argument("--dataset-path", type=str, default="data/dataset.npz")
     parser.add_argument("--resize-to", type=int, default=64)
     parser.add_argument("--horizon", type=int, default=5, help="Imagination steps per training window.")
-    parser.add_argument("--val-frac", type=float, default=0.1, help="Fraction of episodes held out.")
+    parser.add_argument("--val-frac", type=float, default=0.1, help="Fraction of episodes kept unseen, for validation and evaluation.")
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--lr", type=float, default=1e-3)

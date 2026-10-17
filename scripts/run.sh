@@ -29,7 +29,7 @@ case "$ENV_NAME" in
 esac
 SEEDS="${SEEDS:-0 1 2}"
 EPOCHS="${EPOCHS:-100}"
-EPISODES="${EPISODES:-$DEFAULT_EPISODES}"     # collected demonstrations per seed (90% train / 10% held out)
+EPISODES="${EPISODES:-$DEFAULT_EPISODES}"     # collected demonstrations per seed (90% train / 10% unseen)
 MAX_STEPS="${MAX_STEPS:-$DEFAULT_MAX_STEPS}"  # per collected and tested episode
 RANDOM_ACTION_PROB="${RANDOM_ACTION_PROB:-$DEFAULT_RANDOM_ACTION_PROB}"   # exploration bursts in the data
 HORIZON="${HORIZON:-5}"                  # imagination steps per training window
@@ -190,7 +190,7 @@ run_seed() {
   $PYV -m scripts.train --dataset-path "$R/$ENV_NAME.npz" --model_type vla --action_head "$ACTION_HEAD" --action-chunk "$ACTION_CHUNK" \
     $STATE_FLAG --epochs "$EPOCHS" --seed "$SEED" --device "$DEVICE" --save-path "$R/vla.pt" | grep -E "Epoch $EPOCHS/| val:" | tail -2
 
-  # 3. world-model evaluation on held-out episodes (+ counterfactuals)
+  # 3. world-model evaluation on unseen episodes (+ counterfactuals)
   $PYV -m scripts.evaluate --checkpoint "$R/wam.pt" --max-horizon 15 --device "$DEVICE" --output "$R/wam_eval.json"
 
   # 4. closed loop on unseen env seeds
