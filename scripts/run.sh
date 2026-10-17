@@ -40,7 +40,7 @@ STATE_INPUT="${STATE_INPUT:-1}"          # 0 = image + language only (no state_t
 ACTION_HEAD="${ACTION_HEAD:-mlp}"
 ACTION_CHUNK="${ACTION_CHUNK:-8}"        # predict the next K actions at once and execute K/2 (1 = one action per step)
 POLICY_HIDDEN="${POLICY_HIDDEN:-512}"    # policy head hidden width (both models; was d_model = 128)
-POLICY_LAYERS="${POLICY_LAYERS:-3}"      # policy head hidden layers (was 1 for mlp)
+POLICY_LAYERS="${POLICY_LAYERS:-6}"      # policy head hidden layers (was 3, originally 1 for mlp)
 TEST_EPISODES="${TEST_EPISODES:-100}"
 DEVICE="${DEVICE:-auto}"
 OUT="${OUT:-results/$ENV_NAME}"
